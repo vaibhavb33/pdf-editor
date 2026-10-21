@@ -1,297 +1,498 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Dropzone } from "@/components/ui/Dropzone";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ResultCard } from "@/components/ui/ResultCard";
-import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { AnnotationItem, AnnotationType } from "@/lib/pdf/edit";
+import { TextBlock } from "@/lib/pdf/edit-types";
+import { extractPageText } from "@/lib/pdf/text-extractor";
+import { applyPdfEdits } from "@/lib/pdf/edit-engine";
 import { createDownloadBlob } from "@/lib/pdf/types";
+import { EditToolbar } from "./edit/EditToolbar";
+import { EditThumbnailSidebar } from "./edit/EditThumbnailSidebar";
+import { EditPageCanvas } from "./edit/EditPageCanvas";
 
 export function EditWorkspace() {
   const [file, setFile] = useState<File | null>(null);
-  const [activeTool, setActiveTool] = useState<AnnotationType>("text");
-  const [pageNumber, setPageNumber] = useState(1);
-  const [textInput, setTextInput] = useState("Sample Annotation");
-  const [fontSize, setFontSize] = useState(14);
-  const [stampImageBytes, setStampImageBytes] = useState<Uint8Array | null>(null);
+  const [fileBytes, setFileBytes] = useState<Uint8Array | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [pdfDoc, setPdfDoc] = useState<any | null>(null);
+  const [numPages, setNumPages] = useState<number>(0);
 
-  const [annotations, setAnnotations] = useState<AnnotationItem[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [stage, setStage] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // Text blocks state & history
+  const [blocks, setBlocks] = useState<TextBlock[]>([]);
+  const [history, setHistory] = useState<TextBlock[][]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+
+  // Editor navigation & view state
+  const [currentPage, setCurrentPage] = useState<number>(0);
+  const [scale, setScale] = useState<number>(1.2);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [isAddTextActive, setIsAddTextActive] = useState<boolean>(false);
+  const [isScannedPdf, setIsScannedPdf] = useState<boolean>(false);
+
+  // Loading & export states
+  const [isLoadingPdf, setIsLoadingPdf] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportProgress, setExportProgress] = useState<number>(0);
+  const [exportStage, setExportStage] = useState<string>("");
   const [result, setResult] = useState<{ url: string; size: number; name: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
 
-  const handleFiles = (files: File[]) => {
-    if (files.length > 0) {
-      setFile(files[0]);
-      setError(null);
-    }
-  };
+  // Helper to push a new state to the Undo/Redo history
+  const pushHistory = useCallback(
+    (newBlocks: TextBlock[]) => {
+      setHistory((prev) => {
+        const next = prev.slice(0, historyIndex + 1);
+        next.push(newBlocks);
+        return next;
+      });
+      setHistoryIndex((prev) => prev + 1);
+      setBlocks(newBlocks);
+    },
+    [historyIndex]
+  );
 
-  const handleAddAnnotation = () => {
-    const newAnnotation: AnnotationItem = {
-      id: `ann_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      type: activeTool,
-      pageIndex: Math.max(0, pageNumber - 1),
-      x: 100,
-      y: 500 - annotations.length * 40,
-      text: activeTool === "text" ? textInput : undefined,
-      fontSize: activeTool === "text" ? fontSize : undefined,
-      color: activeTool === "text" ? { r: 0.1, g: 0.1, b: 0.8 } : undefined,
-      imageBytes: activeTool === "image" && stampImageBytes ? stampImageBytes : undefined,
-    };
-
-    setAnnotations((prev) => [...prev, newAnnotation]);
-    toast.success("Element added", `Added ${activeTool} to page ${pageNumber}.`);
-  };
-
-  const handleApplyEdits = async () => {
-    if (!file) return;
-
-    if (annotations.length === 0) {
-      toast.warning("No elements", "Add at least one text, shape, or highlight before saving.");
-      return;
-    }
-
-    setIsProcessing(true);
-    setProgress(15);
-    setStage("Applying vector elements and text annotations...");
+  // Handle file selection
+  const handleFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    const selectedFile = files[0];
+    setFile(selectedFile);
     setError(null);
+    setResult(null);
+    setIsLoadingPdf(true);
 
     try {
-      const buffer = new Uint8Array(await file.arrayBuffer());
+      const buffer = new Uint8Array(await selectedFile.arrayBuffer());
+      setFileBytes(buffer);
 
-      const { editPdf } = await import("@/lib/pdf/edit");
-      const res = await editPdf({
-        fileData: buffer,
-        annotations,
+      // Dynamically load PDF.js client-side
+      const pdfjs = await import("pdfjs-dist");
+      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+        pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+      }
+
+      const doc = await pdfjs.getDocument({ data: buffer }).promise;
+      setPdfDoc(doc);
+      setNumPages(doc.numPages);
+
+      // Extract text blocks for all pages
+      const allBlocks: TextBlock[] = [];
+      for (let i = 0; i < doc.numPages; i++) {
+        const page = await doc.getPage(i + 1);
+        const pageData = await extractPageText(page, i, 1.0);
+        allBlocks.push(...pageData.blocks);
+      }
+
+      if (allBlocks.length === 0) {
+        setIsScannedPdf(true);
+      } else {
+        setIsScannedPdf(false);
+      }
+
+      setBlocks(allBlocks);
+      setHistory([allBlocks]);
+      setHistoryIndex(0);
+      setCurrentPage(0);
+      toast.success("PDF Loaded", `Extracted ${allBlocks.length} text blocks across ${doc.numPages} page(s).`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to load and parse PDF document.";
+      setError(msg);
+      toast.error("Loading Error", msg);
+    } finally {
+      setIsLoadingPdf(false);
+    }
+  };
+
+  // Undo / Redo
+  const handleUndo = useCallback(() => {
+    if (historyIndex > 0) {
+      const nextIndex = historyIndex - 1;
+      setHistoryIndex(nextIndex);
+      setBlocks(history[nextIndex]);
+    }
+  }, [historyIndex, history]);
+
+  const handleRedo = useCallback(() => {
+    if (historyIndex < history.length - 1) {
+      const nextIndex = historyIndex + 1;
+      setHistoryIndex(nextIndex);
+      setBlocks(history[nextIndex]);
+    }
+  }, [historyIndex, history]);
+
+  const handleDeleteSelectedBlock = useCallback(() => {
+    if (!selectedBlockId) return;
+    const nextBlocks = blocks.map((b) =>
+      b.id === selectedBlockId ? { ...b, isDeleted: true } : b
+    );
+    pushHistory(nextBlocks);
+    setSelectedBlockId(null);
+    toast.info("Deleted", "Text block removed from document.");
+  }, [selectedBlockId, blocks, pushHistory, toast]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger global shortcuts if typing inside an active textarea/input
+      const target = e.target as HTMLElement;
+      const isInput =
+        target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        handleRedo();
+      } else if (e.key === "Escape") {
+        setSelectedBlockId(null);
+        setIsAddTextActive(false);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && !isInput && selectedBlockId) {
+        e.preventDefault();
+        handleDeleteSelectedBlock();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleUndo, handleRedo, selectedBlockId, handleDeleteSelectedBlock]);
+
+  // Selected block updates
+  const selectedBlock = blocks.find((b) => b.id === selectedBlockId) || null;
+
+  const handleUpdateSelectedBlock = (updates: Partial<TextBlock>) => {
+    if (!selectedBlockId) return;
+    const nextBlocks = blocks.map((b) =>
+      b.id === selectedBlockId
+        ? {
+            ...b,
+            ...updates,
+            isEdited: true,
+          }
+        : b
+    );
+    pushHistory(nextBlocks);
+  };
+
+  const handleUpdateBlock = (blockId: string, updates: Partial<TextBlock>) => {
+    const nextBlocks = blocks.map((b) =>
+      b.id === blockId
+        ? {
+            ...b,
+            ...updates,
+            isEdited: true,
+          }
+        : b
+    );
+    // Don't flood history on keystroke, update directly or debounce
+    setBlocks(nextBlocks);
+  };
+
+  const handleDeleteBlock = (blockId: string) => {
+    const nextBlocks = blocks.map((b) =>
+      b.id === blockId ? { ...b, isDeleted: true } : b
+    );
+    pushHistory(nextBlocks);
+    if (selectedBlockId === blockId) {
+      setSelectedBlockId(null);
+    }
+  };
+
+  // Add text block at specific coordinates
+  const handleAddTextAtPoint = ({
+    pageIndex,
+    pdfX,
+    pdfY,
+    viewportX,
+    viewportY,
+  }: {
+    pageIndex: number;
+    pdfX: number;
+    pdfY: number;
+    viewportX: number;
+    viewportY: number;
+  }) => {
+    const newId = `new_block_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const fontSize = 14;
+    const defaultText = "Click to edit text";
+
+    const newBlock: TextBlock = {
+      id: newId,
+      pageIndex,
+      originalText: "",
+      currentText: defaultText,
+      x: pdfX,
+      y: pdfY,
+      pdfBounds: {
+        x: pdfX,
+        y: pdfY - fontSize * 0.25,
+        width: fontSize * 0.6 * defaultText.length,
+        height: fontSize * 1.25,
+      },
+      viewportBounds: {
+        left: viewportX,
+        top: viewportY,
+        width: fontSize * 0.6 * defaultText.length * scale,
+        height: fontSize * 1.25 * scale,
+      },
+      fontSize,
+      fontFamily: "sans-serif",
+      isBold: false,
+      isItalic: false,
+      color: { r: 0.07, g: 0.1, b: 0.15 },
+      bgColor: { r: 1, g: 1, b: 1 },
+      isNew: true,
+      isEdited: true,
+    };
+
+    const nextBlocks = [...blocks, newBlock];
+    pushHistory(nextBlocks);
+    setSelectedBlockId(newId);
+    setIsAddTextActive(false);
+    toast.success("Text Box Added", "Type your content or adjust font settings above.");
+  };
+
+  // Zoom controls
+  const handleZoomIn = () => setScale((s) => Math.min(2.5, Math.round((s + 0.15) * 100) / 100));
+  const handleZoomOut = () => setScale((s) => Math.max(0.5, Math.round((s - 0.15) * 100) / 100));
+  const handleResetZoom = () => setScale(1.0);
+  const handleFitWidth = () => {
+    if (scrollContainerRef.current) {
+      const containerWidth = scrollContainerRef.current.clientWidth - (isSidebarOpen ? 240 : 60);
+      // Standard page width is ~595pt (A4 portrait)
+      const idealScale = Math.max(0.5, Math.min(2.0, (containerWidth - 64) / 595));
+      setScale(Math.round(idealScale * 100) / 100);
+    }
+  };
+
+  // Jump to specific page
+  const handleScrollToPage = (targetPageIndex: number) => {
+    setCurrentPage(targetPageIndex);
+    const pageEl = document.getElementById(`page-container-${targetPageIndex + 1}`);
+    if (pageEl) {
+      pageEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  // Export / Download
+  const handleDownload = async () => {
+    if (!fileBytes || !file) return;
+
+    setIsExporting(true);
+    setExportProgress(10);
+    setExportStage("Analyzing text modifications...");
+
+    try {
+      const res = await applyPdfEdits({
+        fileData: fileBytes,
+        blocks,
         outputFilename: `edited-${file.name}`,
         onProgress: (p, s) => {
-          setProgress(p);
-          setStage(s);
+          setExportProgress(p);
+          setExportStage(s);
         },
       });
 
-      if (!res.data) throw new Error("No data returned from editing.");
+      if (!res.data) throw new Error("Could not generate edited PDF.");
 
       const blob = createDownloadBlob(res.data, "application/pdf");
-      const downloadUrl = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(blob);
 
       setResult({
-        url: downloadUrl,
+        url,
         size: blob.size,
         name: res.filename,
       });
 
-      toast.success("Edits Applied", "Annotated document exported successfully!");
+      // Direct download trigger for immediate user gratification
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      toast.success("PDF Downloaded", "Your edited PDF has been saved successfully!");
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to edit PDF.";
+      const msg = err instanceof Error ? err.message : "Failed to export edited PDF.";
       setError(msg);
-      toast.error("Edit Failed", msg);
+      toast.error("Export Error", msg);
     } finally {
-      setIsProcessing(false);
+      setIsExporting(false);
     }
   };
 
   const handleReset = () => {
-    if (result?.url) URL.revokeObjectURL(result.url);
     setFile(null);
-    setAnnotations([]);
+    setFileBytes(null);
+    setPdfDoc(null);
+    setNumPages(0);
+    setBlocks([]);
+    setHistory([]);
+    setHistoryIndex(-1);
+    setSelectedBlockId(null);
     setResult(null);
     setError(null);
-    setProgress(0);
+    setIsScannedPdf(false);
   };
 
-  if (result) {
+  // If no file loaded yet, render the clean iLovePDF centered dropzone
+  if (!file || !pdfDoc) {
     return (
-      <ResultCard
-        filename={result.name}
-        filesize={result.size}
-        originalSize={file?.size}
-        downloadUrl={result.url}
-        onReset={handleReset}
-      />
+      <div className="w-full py-8">
+        <div className="mx-auto max-w-2xl">
+          <Dropzone
+            onFilesSelected={handleFiles}
+            maxFiles={1}
+            isLoading={isLoadingPdf}
+            errorMessage={error}
+            onClearError={() => setError(null)}
+          />
+
+          {isLoadingPdf && (
+            <div className="mt-6 flex flex-col items-center justify-center space-y-2">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+              <p className="text-xs text-zinc-500">Extracting PDF pages and typography...</p>
+            </div>
+          )}
+        </div>
+      </div>
     );
   }
 
+  // Full Editor View
   return (
-    <div className="space-y-6">
-      {!file ? (
-        <Dropzone
-          onFilesSelected={handleFiles}
-          acceptedTypes={[".pdf", "application/pdf"]}
-          maxFiles={1}
-          errorMessage={error}
-          onClearError={() => setError(null)}
+    <div className="flex h-[calc(100vh-140px)] min-h-[600px] w-full flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xs dark:border-zinc-800 dark:bg-zinc-950">
+      {/* Top Toolbar */}
+      <EditToolbar
+        selectedBlock={selectedBlock}
+        onUpdateSelectedBlock={handleUpdateSelectedBlock}
+        onDeleteSelectedBlock={handleDeleteSelectedBlock}
+        isAddTextActive={isAddTextActive}
+        onToggleAddText={() => {
+          setIsAddTextActive(!isAddTextActive);
+          if (!isAddTextActive) {
+            setSelectedBlockId(null);
+            toast.info("Add Text Active", "Click anywhere on the document to place a new text box.");
+          }
+        }}
+        canUndo={historyIndex > 0}
+        canRedo={historyIndex < history.length - 1}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        scale={scale}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onResetZoom={handleResetZoom}
+        onFitWidth={handleFitWidth}
+        currentPage={currentPage}
+        totalPages={numPages}
+        onDownload={handleDownload}
+        isSaving={isExporting}
+      />
+
+      {/* Scanned PDF Warning Banner */}
+      {isScannedPdf && (
+        <div
+          role="alert"
+          className="flex items-center justify-between border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+        >
+          <div className="flex items-center gap-2">
+            <svg className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>
+              <strong>Scanned Document:</strong> No selectable text was found on this PDF. You can still insert new text boxes using the <em>Add Text</em> tool.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsScannedPdf(false)}
+            className="text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-200"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* Exporting Progress Bar Modal / Overlay */}
+      {isExporting && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950/40 backdrop-blur-2xs p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-zinc-900">
+            <h3 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Generating Edited PDF
+            </h3>
+            <ProgressBar progress={exportProgress} stage={exportStage} />
+          </div>
+        </div>
+      )}
+
+      {/* Main Workspace Area (Left Thumbnail Sidebar + Center Scrollable Pages Canvas) */}
+      <div className="relative flex flex-1 overflow-hidden">
+        {/* Left Thumbnails Sidebar */}
+        <EditThumbnailSidebar
+          pdfDoc={pdfDoc}
+          numPages={numPages}
+          currentPage={currentPage}
+          onSelectPage={handleScrollToPage}
+          isOpen={isSidebarOpen}
+          onToggleOpen={() => setIsSidebarOpen(!isSidebarOpen)}
         />
-      ) : (
-        <div className="space-y-6 rounded-3xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900/60">
-          <div className="flex items-center justify-between border-b border-zinc-100 pb-4 dark:border-zinc-800">
-            <div>
-              <h4 className="max-w-xs truncate text-sm font-bold text-zinc-900 sm:max-w-md dark:text-zinc-100">
-                {file.name}
-              </h4>
-              <p className="text-xs text-zinc-500">{annotations.length} items to apply</p>
-            </div>
-            <button
-              type="button"
-              onClick={handleReset}
-              className="min-h-[44px] cursor-pointer px-3 text-xs font-semibold text-zinc-500 transition-colors hover:text-rose-600"
-            >
-              Change file
-            </button>
+
+        {/* Center Scrollable Document Pages */}
+        <main
+          ref={scrollContainerRef}
+          onClick={() => {
+            // Clicking canvas background deselects
+            if (!isAddTextActive) {
+              setSelectedBlockId(null);
+            }
+          }}
+          className="flex-1 overflow-y-auto overflow-x-auto bg-zinc-100 p-4 sm:p-8 dark:bg-zinc-900/50"
+        >
+          <div className="mx-auto flex flex-col items-center">
+            {Array.from({ length: numPages }).map((_, i) => (
+              <EditPageCanvas
+                key={i}
+                pdfDoc={pdfDoc}
+                pageIndex={i}
+                scale={scale}
+                blocks={blocks.filter((b) => b.pageIndex === i)}
+                selectedBlockId={selectedBlockId}
+                onSelectBlock={(id) => {
+                  setSelectedBlockId(id);
+                  setIsAddTextActive(false);
+                }}
+                onUpdateBlock={handleUpdateBlock}
+                onDeleteBlock={handleDeleteBlock}
+                isAddTextActive={isAddTextActive}
+                onAddTextAtPoint={handleAddTextAtPoint}
+                onPageVisible={(idx) => setCurrentPage(idx)}
+              />
+            ))}
           </div>
+        </main>
+      </div>
 
-          {/* Annotation Toolbar */}
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              {[
-                { id: "text" as AnnotationType, label: "Add Text", icon: "T" },
-                { id: "highlight" as AnnotationType, label: "Highlight Box", icon: "✎" },
-                { id: "rectangle" as AnnotationType, label: "Rectangle Shape", icon: "▭" },
-                { id: "image" as AnnotationType, label: "Image Stamp", icon: "🖼" },
-              ].map((tool) => (
-                <button
-                  key={tool.id}
-                  type="button"
-                  onClick={() => setActiveTool(tool.id)}
-                  className={`flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl px-4 text-xs font-semibold transition-all sm:text-sm ${
-                    activeTool === tool.id
-                      ? "bg-blue-600 text-white shadow-xs"
-                      : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-                  }`}
-                >
-                  <span>{tool.icon}</span>
-                  <span>{tool.label}</span>
-                </button>
-              ))}
-            </div>
-
-            {/* Tool specific settings */}
-            <div className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/80">
-              {activeTool === "text" && (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div className="sm:col-span-2">
-                    <label className="mb-1 block text-xs font-semibold text-zinc-500">
-                      Text Content
-                    </label>
-                    <input
-                      type="text"
-                      value={textInput}
-                      onChange={(e) => setTextInput(e.target.value)}
-                      className="min-h-[44px] w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-zinc-500">
-                      Font Size (pt)
-                    </label>
-                    <input
-                      type="number"
-                      min="8"
-                      max="48"
-                      value={fontSize}
-                      onChange={(e) => setFontSize(parseInt(e.target.value, 10) || 14)}
-                      className="min-h-[44px] w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {activeTool === "image" && (
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-zinc-500">
-                    Select Stamp Image
-                  </label>
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg"
-                    onChange={async (e) => {
-                      const f = e.target.files?.[0];
-                      if (f) {
-                        setStampImageBytes(new Uint8Array(await f.arrayBuffer()));
-                      }
-                    }}
-                    className="w-full text-xs"
-                  />
-                </div>
-              )}
-
-              <div className="flex items-center justify-between pt-2">
-                <div className="flex items-center gap-2 text-xs">
-                  <label
-                    htmlFor="target-page-num"
-                    className="font-semibold text-zinc-600 dark:text-zinc-400"
-                  >
-                    Apply to Page:
-                  </label>
-                  <input
-                    id="target-page-num"
-                    type="number"
-                    min="1"
-                    value={pageNumber}
-                    onChange={(e) => setPageNumber(parseInt(e.target.value, 10) || 1)}
-                    className="min-h-[44px] w-16 rounded-xl border border-zinc-200 bg-white px-2 text-center text-sm font-bold dark:border-zinc-700 dark:bg-zinc-950"
-                  />
-                </div>
-
-                <Button variant="secondary" size="sm" onClick={handleAddAnnotation}>
-                  + Add to Document
-                </Button>
-              </div>
-            </div>
-
-            {/* List of pending annotations */}
-            {annotations.length > 0 && (
-              <div className="space-y-2">
-                <h5 className="text-xs font-bold tracking-wider text-zinc-500 uppercase">
-                  Pending Elements ({annotations.length})
-                </h5>
-                <div className="flex flex-wrap gap-2">
-                  {annotations.map((ann, i) => (
-                    <span
-                      key={ann.id}
-                      className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-                    >
-                      <span className="font-semibold text-blue-600 capitalize">{ann.type}</span>
-                      <span>(p.{ann.pageIndex + 1})</span>
-                      <button
-                        type="button"
-                        onClick={() => setAnnotations((prev) => prev.filter((_, idx) => idx !== i))}
-                        className="ml-1 cursor-pointer text-rose-500 hover:text-rose-700"
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {isProcessing && (
-            <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
-              <ProgressBar progress={progress} stage={stage} />
-            </div>
-          )}
-
-          {!isProcessing && (
-            <div className="flex justify-end pt-2">
-              <Button
-                variant="primary"
-                onClick={handleApplyEdits}
-                disabled={annotations.length === 0}
-                className="min-h-[48px] px-8"
-              >
-                Apply All & Export PDF
-              </Button>
-            </div>
-          )}
+      {/* Export Result Footer if generated */}
+      {result && (
+        <div className="border-t border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+          <ResultCard
+            filename={result.name}
+            filesize={result.size}
+            downloadUrl={result.url}
+            onReset={handleReset}
+          />
         </div>
       )}
     </div>

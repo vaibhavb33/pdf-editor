@@ -131,108 +131,131 @@ export function SplitWorkspace() {
           onClearError={() => setError(null)}
         />
       ) : (
-        <div className="space-y-6 rounded-3xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900/60">
-          {/* File Selected Badge */}
-          <div className="flex items-center justify-between border-b border-zinc-100 pb-4 dark:border-zinc-800">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  />
+        <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
+          {/* Left: Document workspace preview */}
+          <div className="flex-1 w-full rounded-2xl border border-zinc-200 bg-white p-6 sm:p-8 dark:border-zinc-800 dark:bg-zinc-900/60 min-h-[380px] flex flex-col justify-between">
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-4 dark:border-zinc-800">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <h4 className="max-w-xs truncate text-base font-bold text-zinc-900 sm:max-w-md dark:text-zinc-100">
+                    {file.name}
+                  </h4>
+                  <p className="text-xs text-zinc-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleReset}
+                className="min-h-[44px] cursor-pointer px-3 text-xs font-semibold text-zinc-500 transition-colors hover:text-rose-600"
+              >
+                Change file
+              </button>
+            </div>
+
+            {/* Visual Split preview indicator */}
+            <div className="my-8 flex flex-col items-center justify-center text-center">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
+                <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                 </svg>
               </div>
-              <div>
-                <h4 className="max-w-xs truncate text-sm font-bold text-zinc-900 sm:max-w-md dark:text-zinc-100">
-                  {file.name}
-                </h4>
-                <p className="text-xs text-zinc-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-              </div>
+              <p className="mt-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                {splitMode === "all" ? "Extracting each page as individual PDF" : `Extracting ranges: ${rangeInput || "custom"}`}
+              </p>
+              <p className="text-xs text-zinc-400">
+                All pages are processed in browser memory and packaged as a ZIP download
+              </p>
             </div>
 
-            <button
-              type="button"
-              onClick={handleReset}
-              className="min-h-[44px] px-3 text-xs font-semibold text-zinc-500 transition-colors hover:text-rose-600"
-            >
-              Change file
-            </button>
-          </div>
-
-          {/* Split Mode Options */}
-          <div className="space-y-4">
-            <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Choose Split Mode
-            </h4>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => setSplitMode("all")}
-                className={`cursor-pointer rounded-2xl border p-4 text-left transition-all ${
-                  splitMode === "all"
-                    ? "border-blue-600 bg-blue-50/50 text-blue-900 dark:bg-blue-950/30 dark:text-blue-100"
-                    : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800"
-                }`}
-              >
-                <div className="text-sm font-bold">Split all pages</div>
-                <div className="mt-1 text-xs text-zinc-500">
-                  Extracts every page as an individual PDF inside a ZIP archive.
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSplitMode("range")}
-                className={`cursor-pointer rounded-2xl border p-4 text-left transition-all ${
-                  splitMode === "range"
-                    ? "border-blue-600 bg-blue-50/50 text-blue-900 dark:bg-blue-950/30 dark:text-blue-100"
-                    : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800"
-                }`}
-              >
-                <div className="text-sm font-bold">Extract custom ranges</div>
-                <div className="mt-1 text-xs text-zinc-500">
-                  Extract specific pages or page groups (e.g. 1-3, 5).
-                </div>
-              </button>
-            </div>
-
-            {splitMode === "range" && (
-              <div className="space-y-2 pt-2">
-                <label
-                  htmlFor="range-input"
-                  className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
-                >
-                  Page ranges (comma-separated):
-                </label>
-                <input
-                  id="range-input"
-                  type="text"
-                  value={rangeInput}
-                  onChange={(e) => setRangeInput(e.target.value)}
-                  placeholder="e.g. 1-3, 5, 7-10"
-                  className="min-h-[44px] w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 text-sm focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:outline-none dark:border-zinc-800 dark:bg-zinc-900"
-                />
+            {isProcessing && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
+                <ProgressBar progress={progress} stage={stage} />
               </div>
             )}
+            {!isProcessing && <div />}
           </div>
 
-          {isProcessing && (
-            <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
-              <ProgressBar progress={progress} stage={stage} />
-            </div>
-          )}
+          {/* Right Sidebar: Split Options + Full-width Action Button */}
+          <div className="w-full lg:w-80 shrink-0 rounded-2xl border border-zinc-200 bg-white p-6 shadow-xs dark:border-zinc-800 dark:bg-zinc-900 flex flex-col justify-between min-h-[380px]">
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold tracking-wider text-zinc-900 uppercase dark:text-zinc-100">
+                Split Options
+              </h3>
 
-          {!isProcessing && (
-            <div className="flex justify-end pt-2">
-              <Button variant="primary" onClick={handleSplit} className="min-h-[48px] px-8">
-                Extract & Split PDF
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => setSplitMode("all")}
+                  className={`w-full cursor-pointer rounded-xl border p-3.5 text-left transition-all ${
+                    splitMode === "all"
+                      ? "border-blue-600 bg-blue-50/60 text-blue-950 ring-1 ring-blue-600 dark:bg-blue-950/40 dark:text-blue-100"
+                      : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800"
+                  }`}
+                >
+                  <div className="text-xs font-bold">Split all pages</div>
+                  <div className="mt-0.5 text-[11px] text-zinc-500">
+                    Extract every page into individual files in a ZIP
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSplitMode("range")}
+                  className={`w-full cursor-pointer rounded-xl border p-3.5 text-left transition-all ${
+                    splitMode === "range"
+                      ? "border-blue-600 bg-blue-50/60 text-blue-950 ring-1 ring-blue-600 dark:bg-blue-950/40 dark:text-blue-100"
+                      : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800"
+                  }`}
+                >
+                  <div className="text-xs font-bold">Extract custom ranges</div>
+                  <div className="mt-0.5 text-[11px] text-zinc-500">
+                    Extract specific pages (e.g. 1-3, 5)
+                  </div>
+                </button>
+              </div>
+
+              {splitMode === "range" && (
+                <div className="space-y-1.5 pt-2">
+                  <label
+                    htmlFor="range-input"
+                    className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+                  >
+                    Pages or ranges:
+                  </label>
+                  <input
+                    id="range-input"
+                    type="text"
+                    value={rangeInput}
+                    onChange={(e) => setRangeInput(e.target.value)}
+                    placeholder="e.g. 1-3, 5, 7-10"
+                    className="min-h-[44px] w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 text-xs focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:outline-none dark:border-zinc-800 dark:bg-zinc-900"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+              <Button
+                variant="primary"
+                onClick={handleSplit}
+                disabled={isProcessing}
+                className="w-full min-h-[50px] text-base font-bold shadow-sm"
+              >
+                Split PDF →
               </Button>
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>

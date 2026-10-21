@@ -2,29 +2,7 @@ import type { Metadata } from "next";
 import { getAllTools } from "@/content";
 import { constructMetadata } from "@/lib/seo/metadata";
 import { HomeToolExplorer } from "@/components/home/HomeToolExplorer";
-import dynamic from "next/dynamic";
 import { FaqAccordion } from "@/components/ui/FaqAccordion";
-
-const InteractiveWorkspacePreview = dynamic(
-  () =>
-    import("@/components/home/InteractiveWorkspacePreview").then(
-      (m) => m.InteractiveWorkspacePreview
-    ),
-  {
-    loading: () => (
-      <div
-        role="status"
-        aria-live="polite"
-        className="flex min-h-[420px] w-full animate-pulse flex-col items-center justify-center rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
-      >
-        <div className="mb-4 h-12 w-12 rounded-2xl bg-zinc-200 dark:bg-zinc-800" />
-        <div className="mb-2 h-6 w-48 rounded bg-zinc-200 dark:bg-zinc-800" />
-        <div className="h-4 w-64 rounded bg-zinc-100 dark:bg-zinc-800/60" />
-        <span className="sr-only">Loading interactive workspace demo...</span>
-      </div>
-    ),
-  }
-);
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { getOrganizationSchema, getWebSiteSchema } from "@/lib/seo/schema";
@@ -76,92 +54,28 @@ export default function HomePage() {
       <JsonLd data={orgSchema} />
       <JsonLd data={webSiteSchema} />
 
-      {/* 1. Hero Section */}
+      {/* 1. Hero Section - iLovePDF Clean Aesthetic */}
       <section
         id="hero"
-        className="relative overflow-hidden border-b border-zinc-200 bg-zinc-50/60 pt-12 pb-16 sm:pt-20 sm:pb-24 dark:border-zinc-800/80 dark:bg-zinc-950/60"
+        className="border-b border-zinc-200 bg-zinc-50/60 pt-10 pb-12 sm:pt-16 sm:pb-16 dark:border-zinc-800/80 dark:bg-zinc-950/60"
       >
-        {/* Subtle Ambient Radial Glow */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute top-0 left-1/2 h-[300px] w-[600px] -translate-x-1/2 rounded-full bg-blue-500/10 blur-[100px] dark:bg-blue-600/15"
-        />
-
-        <div className="relative z-10 mx-auto max-w-5xl space-y-6 px-4 text-center sm:px-6">
-          {/* Trust messaging badges */}
+        <div className="mx-auto max-w-4xl space-y-4 px-4 text-center sm:px-6">
           <div className="flex flex-wrap items-center justify-center gap-2">
             <Badge variant="success">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               100% Client-Side Engine
             </Badge>
             <Badge variant="primary">No Signup Required</Badge>
             <Badge variant="outline">Zero Server Uploads</Badge>
           </div>
 
-          {/* Main Trust Headline */}
-          <h1 className="text-3xl leading-[1.15] font-extrabold tracking-tight text-zinc-900 sm:text-5xl md:text-6xl dark:text-white">
-            Free Online PDF Tools.{" "}
-            <span className="mt-1 block text-blue-600 dark:text-blue-400">
-              Files never leave your device.
-            </span>
+          <h1 className="text-3xl font-extrabold tracking-tight text-zinc-900 sm:text-5xl dark:text-white">
+            Every tool you need to work with PDFs in one place
           </h1>
 
-          <p className="mx-auto max-w-2xl text-sm leading-relaxed text-zinc-600 sm:text-lg dark:text-zinc-400">
-            Merge, split, compress, convert, and protect PDF files directly inside your web browser.
-            No upload queues, no subscriptions, and total privacy.
+          <p className="mx-auto max-w-2xl text-base text-zinc-600 sm:text-lg dark:text-zinc-400">
+            100% free, private, and client-side. Your files never leave your device.
           </p>
-
-          {/* Trust Guarantees Row */}
-          <div className="flex flex-wrap items-center justify-center gap-6 pt-2 text-xs font-medium text-zinc-600 sm:text-sm dark:text-zinc-400">
-            <span className="flex items-center gap-1.5">
-              <svg
-                className="h-4 w-4 text-emerald-500"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2.5}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-              Zero Server Uploads
-            </span>
-            <span className="flex items-center gap-1.5">
-              <svg
-                className="h-4 w-4 text-emerald-500"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2.5}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-              No Registration or Login
-            </span>
-            <span className="flex items-center gap-1.5">
-              <svg
-                className="h-4 w-4 text-emerald-500"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2.5}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-              No Paywall or Limits
-            </span>
-          </div>
         </div>
       </section>
 
@@ -169,12 +83,9 @@ export default function HomePage() {
       <section
         id="tools"
         aria-label="PDF Tools Catalog"
-        className="mx-auto w-full max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8"
+        className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8"
       >
         <div className="mb-8 text-center">
-          <Badge variant="outline" className="mb-2">
-            Tool Directory
-          </Badge>
           <h2 className="text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl dark:text-white">
             Explore All 14 Client-Side PDF Tools
           </h2>
@@ -184,24 +95,6 @@ export default function HomePage() {
           </p>
         </div>
         <HomeToolExplorer initialTools={allTools} />
-      </section>
-
-      {/* 3. Reusable Component Suite Live Demo */}
-      <section id="preview" className="mx-auto w-full max-w-5xl px-4 py-12 sm:px-6">
-        <div className="mb-8 text-center">
-          <Badge variant="primary" className="mb-2">
-            Reusable Architecture
-          </Badge>
-          <h2 className="text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl dark:text-white">
-            Try the Shared Component Workspace
-          </h2>
-          <p className="mx-auto mt-2 max-w-lg text-xs text-zinc-600 sm:text-sm dark:text-zinc-400">
-            Test the drag-and-drop & clipboard paste Dropzone, reorderable FileList, animated
-            ProgressBar, and ResultCard with Download controls.
-          </p>
-        </div>
-
-        <InteractiveWorkspacePreview />
       </section>
 
       {/* 4. Privacy & Trust Architecture */}

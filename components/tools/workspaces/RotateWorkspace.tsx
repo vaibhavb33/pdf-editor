@@ -100,64 +100,103 @@ export function RotateWorkspace() {
           onClearError={() => setError(null)}
         />
       ) : (
-        <div className="space-y-6 rounded-3xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900/60">
-          <div className="flex items-center justify-between border-b border-zinc-100 pb-4 dark:border-zinc-800">
-            <div>
-              <h4 className="max-w-xs truncate text-sm font-bold text-zinc-900 sm:max-w-md dark:text-zinc-100">
-                {file.name}
-              </h4>
-              <p className="text-xs text-zinc-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+        <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
+          {/* Left: Document preview workspace */}
+          <div className="flex-1 w-full rounded-2xl border border-zinc-200 bg-white p-6 sm:p-8 dark:border-zinc-800 dark:bg-zinc-900/60 min-h-[380px] flex flex-col justify-between">
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-4 dark:border-zinc-800">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <h4 className="max-w-xs truncate text-base font-bold text-zinc-900 sm:max-w-md dark:text-zinc-100">
+                    {file.name}
+                  </h4>
+                  <p className="text-xs text-zinc-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleReset}
+                className="min-h-[44px] cursor-pointer px-3 text-xs font-semibold text-zinc-500 transition-colors hover:text-rose-600"
+              >
+                Change file
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleReset}
-              className="min-h-[44px] cursor-pointer px-3 text-xs font-semibold text-zinc-500 transition-colors hover:text-rose-600"
-            >
-              Change file
-            </button>
+
+            {/* Visual rotation preview indicator */}
+            <div className="my-8 flex flex-col items-center justify-center text-center">
+              <div
+                style={{
+                  transform: `rotate(${degrees}deg)`,
+                  transition: "transform 300ms ease",
+                }}
+                className="flex h-24 w-18 items-center justify-center rounded-lg border-2 border-dashed border-blue-500 bg-blue-50/50 text-blue-600 shadow-sm dark:bg-blue-950/30 dark:text-blue-400"
+              >
+                <span className="text-xs font-bold">PDF</span>
+              </div>
+              <p className="mt-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                Rotation: {degrees}° clockwise
+              </p>
+            </div>
+
+            {isProcessing && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
+                <ProgressBar progress={progress} stage={stage} />
+              </div>
+            )}
+            {!isProcessing && <div />}
           </div>
 
-          <div className="space-y-4">
-            <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Select Rotation Angle
-            </h4>
+          {/* Right Sidebar: Rotation Options + Action Button */}
+          <div className="w-full lg:w-80 shrink-0 rounded-2xl border border-zinc-200 bg-white p-6 shadow-xs dark:border-zinc-800 dark:bg-zinc-900 flex flex-col justify-between min-h-[380px]">
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold tracking-wider text-zinc-900 uppercase dark:text-zinc-100">
+                Rotate Options
+              </h3>
 
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { deg: 90 as const, label: "90° Right", icon: "↻" },
-                { deg: 180 as const, label: "180° Flip", icon: "↺↻" },
-                { deg: 270 as const, label: "270° Left", icon: "↺" },
-              ].map((item) => (
-                <button
-                  key={item.deg}
-                  type="button"
-                  onClick={() => setDegrees(item.deg)}
-                  className={`cursor-pointer rounded-2xl border p-4 text-center transition-all ${
-                    degrees === item.deg
-                      ? "border-blue-600 bg-blue-50/50 text-blue-900 dark:bg-blue-950/30 dark:text-blue-100"
-                      : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800"
-                  }`}
-                >
-                  <div className="mb-1 text-xl font-bold">{item.icon}</div>
-                  <div className="text-xs font-semibold">{item.label}</div>
-                </button>
-              ))}
+              <div className="grid grid-cols-1 gap-2.5">
+                {[
+                  { deg: 90 as const, label: "90° Right (Clockwise)", icon: "↻" },
+                  { deg: 180 as const, label: "180° Flip (Upside Down)", icon: "↺↻" },
+                  { deg: 270 as const, label: "270° Left (Counter-Clockwise)", icon: "↺" },
+                ].map((item) => (
+                  <button
+                    key={item.deg}
+                    type="button"
+                    onClick={() => setDegrees(item.deg)}
+                    className={`w-full flex items-center gap-3 cursor-pointer rounded-xl border p-3.5 text-left transition-all ${
+                      degrees === item.deg
+                        ? "border-blue-600 bg-blue-50/60 text-blue-950 ring-1 ring-blue-600 dark:bg-blue-950/40 dark:text-blue-100"
+                        : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800"
+                    }`}
+                  >
+                    <span className="text-xl font-bold">{item.icon}</span>
+                    <span className="text-xs font-semibold">{item.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          {isProcessing && (
-            <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
-              <ProgressBar progress={progress} stage={stage} />
-            </div>
-          )}
-
-          {!isProcessing && (
-            <div className="flex justify-end pt-2">
-              <Button variant="primary" onClick={handleRotate} className="min-h-[48px] px-8">
-                Rotate PDF {degrees}°
+            <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+              <Button
+                variant="primary"
+                onClick={handleRotate}
+                disabled={isProcessing}
+                className="w-full min-h-[50px] text-base font-bold shadow-sm"
+              >
+                Rotate PDF →
               </Button>
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>

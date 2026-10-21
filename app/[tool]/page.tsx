@@ -118,7 +118,9 @@ export default async function ToolPage({ params }: ToolPageProps) {
       {/* Client-Side Dedicated Interactive Tool Workspace */}
       <section
         aria-label={`${tool.name} Interactive Workspace`}
-        className="mx-auto min-h-[380px] w-full max-w-4xl px-4 py-10 sm:px-6"
+        className={`mx-auto min-h-[380px] w-full ${
+          tool.slug === "edit-pdf" ? "max-w-[1600px] px-2 sm:px-4" : "max-w-6xl px-4 sm:px-6"
+        } py-8`}
       >
         <ToolWorkspaceController slug={tool.slug} />
       </section>

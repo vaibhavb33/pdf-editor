@@ -1,6 +1,9 @@
 import { rgb, StandardFonts } from "pdf-lib";
 import { PdfProcessingOptions, ToolExecutionResult } from "./types";
 import { safeLoadPdf, yieldToEventLoop } from "./safe-load";
+export { applyPdfEdits } from "./edit-engine";
+export type { ApplyEditsOptions } from "./edit-engine";
+export * from "./edit-types";
 
 export type AnnotationType = "text" | "rectangle" | "highlight" | "circle" | "image";
 

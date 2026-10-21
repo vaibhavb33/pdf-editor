@@ -8,38 +8,11 @@ interface ToolCardProps {
 
 export function ToolCard({ tool }: ToolCardProps) {
   const getCategoryTheme = (cat: string) => {
-    switch (cat) {
-      case "organize":
-        return {
-          iconBg:
-            "bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border-blue-200/80 dark:border-blue-900/40",
-          tag: "Organize",
-        };
-      case "convert":
-        return {
-          iconBg:
-            "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border-emerald-200/80 dark:border-emerald-900/40",
-          tag: "Convert",
-        };
-      case "edit":
-        return {
-          iconBg:
-            "bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border-amber-200/80 dark:border-amber-900/40",
-          tag: "Edit",
-        };
-      case "secure":
-        return {
-          iconBg:
-            "bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border-purple-200/80 dark:border-purple-900/40",
-          tag: "Secure",
-        };
-      default:
-        return {
-          iconBg:
-            "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700",
-          tag: cat,
-        };
-    }
+    return {
+      iconBg:
+        "bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/40",
+      tag: cat,
+    };
   };
 
   const getIcon = (id: string) => {

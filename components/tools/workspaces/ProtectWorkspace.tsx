@@ -114,86 +114,127 @@ export function ProtectWorkspace() {
           onClearError={() => setError(null)}
         />
       ) : (
-        <div className="space-y-6 rounded-3xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900/60">
-          <div className="flex items-center justify-between border-b border-zinc-100 pb-4 dark:border-zinc-800">
-            <div>
-              <h4 className="max-w-xs truncate text-sm font-bold text-zinc-900 sm:max-w-md dark:text-zinc-100">
-                {file.name}
-              </h4>
-              <p className="text-xs text-zinc-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+        <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
+          {/* Left: Document workspace preview */}
+          <div className="flex-1 w-full rounded-2xl border border-zinc-200 bg-white p-6 sm:p-8 dark:border-zinc-800 dark:bg-zinc-900/60 min-h-[380px] flex flex-col justify-between">
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-4 dark:border-zinc-800">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <h4 className="max-w-xs truncate text-base font-bold text-zinc-900 sm:max-w-md dark:text-zinc-100">
+                    {file.name}
+                  </h4>
+                  <p className="text-xs text-zinc-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleReset}
+                className="min-h-[44px] cursor-pointer px-3 text-xs font-semibold text-zinc-500 transition-colors hover:text-rose-600"
+              >
+                Change file
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleReset}
-              className="min-h-[44px] cursor-pointer px-3 text-xs font-semibold text-zinc-500 transition-colors hover:text-rose-600"
-            >
-              Change file
-            </button>
+
+            {/* Visual Protect Preview */}
+            <div className="my-8 flex flex-col items-center justify-center text-center">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
+                <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <p className="mt-3 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                Lock and protect this document
+              </p>
+              <p className="text-xs text-zinc-400">
+                Your password encrypts the document in local browser memory
+              </p>
+            </div>
+
+            {isProcessing && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
+                <ProgressBar progress={progress} stage={stage} />
+              </div>
+            )}
+            {!isProcessing && <div />}
           </div>
 
-          <div className="max-w-md space-y-4">
-            <div>
-              <label
-                htmlFor="protect-pw"
-                className="mb-1.5 block text-xs font-semibold tracking-wider text-zinc-500 uppercase"
-              >
-                Set Document Password
-              </label>
-              <div className="relative">
-                <input
-                  id="protect-pw"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter a strong password"
-                  className="min-h-[48px] w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 pr-16 text-sm focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:outline-none dark:border-zinc-800 dark:bg-zinc-900"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  className="absolute inset-y-0 right-0 flex min-h-[44px] cursor-pointer items-center pr-3 text-xs font-semibold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+          {/* Right Sidebar: Security Options + Full-width Action Button */}
+          <div className="w-full lg:w-80 shrink-0 rounded-2xl border border-zinc-200 bg-white p-6 shadow-xs dark:border-zinc-800 dark:bg-zinc-900 flex flex-col justify-between min-h-[380px]">
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold tracking-wider text-zinc-900 uppercase dark:text-zinc-100">
+                Security Settings
+              </h3>
+
+              <div>
+                <label
+                  htmlFor="protect-pw"
+                  className="mb-1 block text-xs font-semibold text-zinc-700 dark:text-zinc-300"
                 >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
+                  Document Password
+                </label>
+                <div className="relative">
+                  <input
+                    id="protect-pw"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter password"
+                    className="min-h-[44px] w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 pr-14 text-xs focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:outline-none dark:border-zinc-800 dark:bg-zinc-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute inset-y-0 right-0 flex min-h-[44px] cursor-pointer items-center pr-3 text-xs font-semibold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="confirm-pw"
+                  className="mb-1 block text-xs font-semibold text-zinc-700 dark:text-zinc-300"
+                >
+                  Repeat Password
+                </label>
+                <input
+                  id="confirm-pw"
+                  type={showPassword ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Confirm password"
+                  className="min-h-[44px] w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 text-xs focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:outline-none dark:border-zinc-800 dark:bg-zinc-900"
+                />
+              </div>
+
+              <div className="rounded-xl border border-zinc-100 bg-zinc-50/60 p-3 text-[11px] leading-relaxed text-zinc-500 dark:border-zinc-800 dark:bg-zinc-800/40">
+                🔒 100% private: Passwords never leave your device. Be sure to remember your password.
               </div>
             </div>
 
-            <div>
-              <label
-                htmlFor="confirm-pw"
-                className="mb-1.5 block text-xs font-semibold tracking-wider text-zinc-500 uppercase"
+            <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+              <Button
+                variant="primary"
+                onClick={handleProtect}
+                disabled={isProcessing}
+                className="w-full min-h-[50px] text-base font-bold shadow-sm"
               >
-                Confirm Password
-              </label>
-              <input
-                id="confirm-pw"
-                type={showPassword ? "text" : "password"}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Repeat password"
-                className="min-h-[48px] w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 text-sm focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:outline-none dark:border-zinc-800 dark:bg-zinc-900"
-              />
-            </div>
-
-            <p className="text-[11px] leading-relaxed text-zinc-500">
-              Passwords are never transmitted to our servers. Be sure to remember your password, as
-              locked files cannot be recovered without it.
-            </p>
-          </div>
-
-          {isProcessing && (
-            <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
-              <ProgressBar progress={progress} stage={stage} />
-            </div>
-          )}
-
-          {!isProcessing && (
-            <div className="flex justify-end pt-2">
-              <Button variant="primary" onClick={handleProtect} className="min-h-[48px] px-8">
-                Protect & Encrypt PDF
+                Protect PDF →
               </Button>
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>

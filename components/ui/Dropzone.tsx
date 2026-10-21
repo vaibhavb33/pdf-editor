@@ -294,8 +294,8 @@ export function Dropzone({
             </p>
 
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-              <span className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-blue-600 px-6 text-sm font-medium text-white shadow-md shadow-blue-600/20 transition-all hover:bg-blue-500 active:scale-95">
-                Browse Files
+              <span className="inline-flex min-h-[48px] items-center justify-center rounded-xl bg-blue-600 px-8 text-base font-bold text-white shadow-xs transition-colors hover:bg-blue-700 active:scale-98">
+                Select PDF file
               </span>
             </div>
 
