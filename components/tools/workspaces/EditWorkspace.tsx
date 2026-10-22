@@ -5,11 +5,11 @@ import { Dropzone } from "@/components/ui/Dropzone";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ResultCard } from "@/components/ui/ResultCard";
 import { useToast } from "@/components/ui/Toast";
-import { TextBlock } from "@/lib/pdf/edit-types";
+import { FontChoice, TextBlock } from "@/lib/pdf/edit-types";
 import { extractPageText } from "@/lib/pdf/text-extractor";
 import { applyPdfEdits } from "@/lib/pdf/edit-engine";
 import { createDownloadBlob } from "@/lib/pdf/types";
-import { EditToolbar } from "./edit/EditToolbar";
+import { EditToolbar, ActiveFormattingState } from "./edit/EditToolbar";
 import { EditThumbnailSidebar } from "./edit/EditThumbnailSidebar";
 import { EditPageCanvas } from "./edit/EditPageCanvas";
 
@@ -20,11 +20,12 @@ export function EditWorkspace() {
   const [pdfDoc, setPdfDoc] = useState<any | null>(null);
   const [numPages, setNumPages] = useState<number>(0);
 
-  // Text blocks state & history
+  // Text blocks state & history stack
   const [blocks, setBlocks] = useState<TextBlock[]>([]);
   const [history, setHistory] = useState<TextBlock[][]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [activeFormatting, setActiveFormatting] = useState<ActiveFormattingState | null>(null);
 
   // Editor navigation & view state
   const [currentPage, setCurrentPage] = useState<number>(0);
@@ -44,7 +45,7 @@ export function EditWorkspace() {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
 
-  // Helper to push a new state to the Undo/Redo history
+  // Helper to push a new state to Undo/Redo history
   const pushHistory = useCallback(
     (newBlocks: TextBlock[]) => {
       setHistory((prev) => {
@@ -99,9 +100,19 @@ export function EditWorkspace() {
       setHistory([allBlocks]);
       setHistoryIndex(0);
       setCurrentPage(0);
-      toast.success("PDF Loaded", `Extracted ${allBlocks.length} text blocks across ${doc.numPages} page(s).`);
+      toast.success(
+        "PDF Loaded",
+        `Extracted ${allBlocks.length} editable text blocks across ${doc.numPages} page(s).`
+      );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to load and parse PDF document.";
+      let msg = "Failed to load and parse PDF document.";
+      if (err instanceof Error) {
+        if (err.name === "PasswordException") {
+          msg = "This PDF is password-protected. Please unlock it with the Unlock PDF tool first.";
+        } else {
+          msg = err.message;
+        }
+      }
       setError(msg);
       toast.error("Loading Error", msg);
     } finally {
@@ -136,10 +147,9 @@ export function EditWorkspace() {
     toast.info("Deleted", "Text block removed from document.");
   }, [selectedBlockId, blocks, pushHistory, toast]);
 
-  // Keyboard shortcuts
+  // Global Keyboard shortcuts (Ctrl+Z, Ctrl+Y, Delete)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger global shortcuts if typing inside an active textarea/input
       const target = e.target as HTMLElement;
       const isInput =
         target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
@@ -167,10 +177,11 @@ export function EditWorkspace() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleUndo, handleRedo, selectedBlockId, handleDeleteSelectedBlock]);
 
-  // Selected block updates
+  // Selected block
   const selectedBlock = blocks.find((b) => b.id === selectedBlockId) || null;
 
-  const handleUpdateSelectedBlock = (updates: Partial<TextBlock>) => {
+  // Apply formatting to selected block
+  const handleApplyFormatting = (updates: Partial<TextBlock>) => {
     if (!selectedBlockId) return;
     const nextBlocks = blocks.map((b) =>
       b.id === selectedBlockId
@@ -182,6 +193,39 @@ export function EditWorkspace() {
         : b
     );
     pushHistory(nextBlocks);
+
+    // Update active formatting state for toolbar
+    if (activeFormatting) {
+      setActiveFormatting({
+        ...activeFormatting,
+        ...(updates.fontFamily && { fontFamily: updates.fontFamily }),
+        ...(updates.fontCategory && { fontCategory: updates.fontCategory }),
+        ...(updates.fontSize && { fontSize: updates.fontSize }),
+        ...(updates.isBold !== undefined && { isBold: updates.isBold }),
+        ...(updates.isItalic !== undefined && { isItalic: updates.isItalic }),
+        ...(updates.isUnderline !== undefined && { isUnderline: updates.isUnderline }),
+        ...(updates.textAlign && { textAlign: updates.textAlign }),
+        ...(updates.color && { color: updates.color }),
+      });
+    }
+  };
+
+  // Clear formatting
+  const handleClearFormatting = () => {
+    if (!selectedBlockId) return;
+    handleApplyFormatting({
+      fontFamily: "Arial",
+      fontCategory: "sans-serif",
+      fontSize: 12,
+      isBold: false,
+      isItalic: false,
+      isUnderline: false,
+      textAlign: "left",
+      color: { r: 0.07, g: 0.1, b: 0.15 },
+      isSubstitutedFont: false,
+      substitutedFontName: undefined,
+    });
+    toast.info("Cleared", "Formatting reset to default Arial 12pt.");
   };
 
   const handleUpdateBlock = (blockId: string, updates: Partial<TextBlock>) => {
@@ -194,7 +238,6 @@ export function EditWorkspace() {
           }
         : b
     );
-    // Don't flood history on keystroke, update directly or debounce
     setBlocks(nextBlocks);
   };
 
@@ -208,23 +251,33 @@ export function EditWorkspace() {
     }
   };
 
-  // Add text block at specific coordinates
+  // Add text block at specific coordinates (either by toolbar tool or clicking empty space)
   const handleAddTextAtPoint = ({
     pageIndex,
     pdfX,
     pdfY,
     viewportX,
     viewportY,
+    inheritedStyle,
   }: {
     pageIndex: number;
     pdfX: number;
     pdfY: number;
     viewportX: number;
     viewportY: number;
+    inheritedStyle?: {
+      fontFamily: string;
+      fontCategory: FontChoice;
+      fontSize: number;
+      color: { r: number; g: number; b: number };
+    };
   }) => {
     const newId = `new_block_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const fontSize = 14;
-    const defaultText = "Click to edit text";
+    const fontSize = inheritedStyle?.fontSize || 12;
+    const fontFamily = inheritedStyle?.fontFamily || "Arial";
+    const fontCategory = inheritedStyle?.fontCategory || "sans-serif";
+    const color = inheritedStyle?.color || { r: 0.07, g: 0.1, b: 0.15 };
+    const defaultText = "Type text here";
 
     const newBlock: TextBlock = {
       id: newId,
@@ -236,30 +289,34 @@ export function EditWorkspace() {
       pdfBounds: {
         x: pdfX,
         y: pdfY - fontSize * 0.25,
-        width: fontSize * 0.6 * defaultText.length,
-        height: fontSize * 1.25,
+        width: Math.max(120, fontSize * 0.6 * defaultText.length),
+        height: fontSize * 1.3,
       },
       viewportBounds: {
         left: viewportX,
         top: viewportY,
-        width: fontSize * 0.6 * defaultText.length * scale,
-        height: fontSize * 1.25 * scale,
+        width: Math.max(120, fontSize * 0.6 * defaultText.length) * scale,
+        height: fontSize * 1.3 * scale,
       },
       fontSize,
-      fontFamily: "sans-serif",
+      fontFamily,
+      fontCategory,
       isBold: false,
       isItalic: false,
-      color: { r: 0.07, g: 0.1, b: 0.15 },
+      isUnderline: false,
+      textAlign: "left",
+      color,
       bgColor: { r: 1, g: 1, b: 1 },
       isNew: true,
       isEdited: true,
+      isSingleLine: false,
+      lineHeight: 1.25,
     };
 
     const nextBlocks = [...blocks, newBlock];
     pushHistory(nextBlocks);
     setSelectedBlockId(newId);
     setIsAddTextActive(false);
-    toast.success("Text Box Added", "Type your content or adjust font settings above.");
   };
 
   // Zoom controls
@@ -269,7 +326,6 @@ export function EditWorkspace() {
   const handleFitWidth = () => {
     if (scrollContainerRef.current) {
       const containerWidth = scrollContainerRef.current.clientWidth - (isSidebarOpen ? 240 : 60);
-      // Standard page width is ~595pt (A4 portrait)
       const idealScale = Math.max(0.5, Math.min(2.0, (containerWidth - 64) / 595));
       setScale(Math.round(idealScale * 100) / 100);
     }
@@ -290,13 +346,16 @@ export function EditWorkspace() {
 
     setIsExporting(true);
     setExportProgress(10);
-    setExportStage("Analyzing text modifications...");
+    setExportStage("Analyzing text modifications and wrapping...");
 
     try {
+      const baseName = file.name.replace(/\.pdf$/i, "");
+      const outputFilename = `${baseName}-edited.pdf`;
+
       const res = await applyPdfEdits({
         fileData: fileBytes,
         blocks,
-        outputFilename: `edited-${file.name}`,
+        outputFilename,
         onProgress: (p, s) => {
           setExportProgress(p);
           setExportStage(s);
@@ -314,7 +373,7 @@ export function EditWorkspace() {
         name: res.filename,
       });
 
-      // Direct download trigger for immediate user gratification
+      // Direct download trigger
       const a = document.createElement("a");
       a.href = url;
       a.download = res.filename;
@@ -341,12 +400,13 @@ export function EditWorkspace() {
     setHistory([]);
     setHistoryIndex(-1);
     setSelectedBlockId(null);
+    setActiveFormatting(null);
     setResult(null);
     setError(null);
     setIsScannedPdf(false);
   };
 
-  // If no file loaded yet, render the clean iLovePDF centered dropzone
+  // If no file loaded yet, render clean dropzone
   if (!file || !pdfDoc) {
     return (
       <div className="w-full py-8">
@@ -362,7 +422,7 @@ export function EditWorkspace() {
           {isLoadingPdf && (
             <div className="mt-6 flex flex-col items-center justify-center space-y-2">
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
-              <p className="text-xs text-zinc-500">Extracting PDF pages and typography...</p>
+              <p className="text-xs text-zinc-500">Extracting PDF pages, typography and layout...</p>
             </div>
           )}
         </div>
@@ -373,10 +433,12 @@ export function EditWorkspace() {
   // Full Editor View
   return (
     <div className="flex h-[calc(100vh-140px)] min-h-[600px] w-full flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xs dark:border-zinc-800 dark:bg-zinc-950">
-      {/* Top Toolbar */}
+      {/* Top Word-Style Ribbon Toolbar */}
       <EditToolbar
         selectedBlock={selectedBlock}
-        onUpdateSelectedBlock={handleUpdateSelectedBlock}
+        activeFormatting={activeFormatting}
+        onApplyFormatting={handleApplyFormatting}
+        onClearFormatting={handleClearFormatting}
         onDeleteSelectedBlock={handleDeleteSelectedBlock}
         isAddTextActive={isAddTextActive}
         onToggleAddText={() => {
@@ -412,7 +474,7 @@ export function EditWorkspace() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
             <span>
-              <strong>Scanned Document:</strong> No selectable text was found on this PDF. You can still insert new text boxes using the <em>Add Text</em> tool.
+              <strong>Scanned Document:</strong> No editable text found, this PDF is a scanned image. You can still add new text anywhere.
             </span>
           </div>
           <button
@@ -453,9 +515,9 @@ export function EditWorkspace() {
         <main
           ref={scrollContainerRef}
           onClick={() => {
-            // Clicking canvas background deselects
             if (!isAddTextActive) {
               setSelectedBlockId(null);
+              setActiveFormatting(null);
             }
           }}
           className="flex-1 overflow-y-auto overflow-x-auto bg-zinc-100 p-4 sm:p-8 dark:bg-zinc-900/50"
@@ -478,6 +540,7 @@ export function EditWorkspace() {
                 isAddTextActive={isAddTextActive}
                 onAddTextAtPoint={handleAddTextAtPoint}
                 onPageVisible={(idx) => setCurrentPage(idx)}
+                onCaretChange={(fmt) => setActiveFormatting(fmt)}
               />
             ))}
           </div>
@@ -498,3 +561,4 @@ export function EditWorkspace() {
     </div>
   );
 }
+
