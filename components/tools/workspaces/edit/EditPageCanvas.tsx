@@ -31,6 +31,7 @@ interface EditPageCanvasProps {
       color: { r: number; g: number; b: number };
     };
   }) => void;
+  initialPageSize?: { width: number; height: number };
   onPageVisible?: (pageIndex: number) => void;
   onCaretChange?: (formatting: ActiveFormattingState) => void;
 }
@@ -270,6 +271,7 @@ export function EditPageCanvas({
   onMergeWithPrevBlock,
   isAddTextActive,
   onAddTextAtPoint,
+  initialPageSize,
   onPageVisible,
   onCaretChange,
 }: EditPageCanvasProps) {
@@ -417,9 +419,61 @@ export function EditPageCanvas({
   };
 
   const pageDimensions = useMemo(() => {
-    if (!viewport) return { width: 595 * scale, height: 842 * scale };
-    return { width: Math.floor(viewport.width), height: Math.floor(viewport.height) };
-  }, [viewport, scale]);
+    if (viewport) {
+      return { width: Math.floor(viewport.width), height: Math.floor(viewport.height) };
+    }
+    if (initialPageSize) {
+      return {
+        width: Math.floor(initialPageSize.width * scale),
+        height: Math.floor(initialPageSize.height * scale),
+      };
+    }
+    return { width: Math.floor(595 * scale), height: Math.floor(842 * scale) };
+  }, [viewport, initialPageSize, scale]);
+
+  // Overlap Warning Detection: If a paragraph grows into an adjacent paragraph, show a subtle warning outline
+  const overlappingBlockIds = useMemo(() => {
+    const overlapping = new Set<string>();
+    const activeBlocks = blocks.filter((b) => !b.isDeleted);
+
+    for (let i = 0; i < activeBlocks.length; i++) {
+      for (let j = i + 1; j < activeBlocks.length; j++) {
+        const b1 = activeBlocks[i];
+        const b2 = activeBlocks[j];
+
+        const isModified = Boolean(
+          b1.isEdited ||
+            b1.isNew ||
+            b1.currentText !== b1.originalText ||
+            b2.isEdited ||
+            b2.isNew ||
+            b2.currentText !== b2.originalText
+        );
+        if (!isModified) continue;
+
+        const colX1 = b1.layout?.columnX ?? b1.pdfBounds.x;
+        const colW1 = b1.layout?.columnWidth ?? b1.pdfBounds.width;
+        const colX2 = b2.layout?.columnX ?? b2.pdfBounds.x;
+        const colW2 = b2.layout?.columnWidth ?? b2.pdfBounds.width;
+
+        const horizOverlap =
+          Math.max(colX1, colX2) < Math.min(colX1 + colW1, colX2 + colW2) - 10;
+        if (!horizOverlap) continue;
+
+        const bottom1 = b1.pdfBounds.y;
+        const top1 = b1.pdfBounds.y + b1.pdfBounds.height;
+        const bottom2 = b2.pdfBounds.y;
+        const top2 = b2.pdfBounds.y + b2.pdfBounds.height;
+
+        const vertOverlap = Math.max(bottom1, bottom2) < Math.min(top1, top2) - 2;
+        if (vertOverlap) {
+          overlapping.add(b1.id);
+          overlapping.add(b2.id);
+        }
+      }
+    }
+    return overlapping;
+  }, [blocks]);
 
   return (
     <div
@@ -477,6 +531,7 @@ export function EditPageCanvas({
                   viewport={viewport}
                   scale={scale}
                   isSelected={selectedBlockId === block.id}
+                  hasOverlapWarning={overlappingBlockIds.has(block.id)}
                   onSelect={() => onSelectBlock(block.id)}
                   onUpdate={(updates) => onUpdateBlock(block.id, updates)}
                   onDelete={() => onDeleteBlock(block.id)}
@@ -499,6 +554,7 @@ interface WordLikeTextBlockItemProps {
   viewport: any;
   scale: number;
   isSelected: boolean;
+  hasOverlapWarning?: boolean;
   onSelect: () => void;
   onUpdate: (updates: Partial<TextBlock>) => void;
   onDelete: () => void;
@@ -512,6 +568,7 @@ function WordLikeTextBlockItem({
   viewport,
   scale,
   isSelected,
+  hasOverlapWarning = false,
   onSelect,
   onUpdate,
   onDelete,
@@ -851,7 +908,11 @@ function WordLikeTextBlockItem({
         padding: 0,
         margin: 0,
         outline: isSelected
-          ? "2px solid #2563EB"
+          ? hasOverlapWarning
+            ? "2px solid #F59E0B"
+            : "2px solid #2563EB"
+          : hasOverlapWarning
+          ? "1.5px dashed #F59E0B"
           : isHovered
           ? "1px dashed #3B82F6"
           : "none",
@@ -879,8 +940,15 @@ function WordLikeTextBlockItem({
         />
       )}
 
+      {/* Subtle Overlap Warning Badge (when a paragraph grows into an adjacent paragraph) */}
+      {hasOverlapWarning && (isSelected || isHovered) && (
+        <div className="absolute -bottom-6 left-0 z-50 flex items-center gap-1 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-xs pointer-events-none select-none">
+          <span>⚠️ Overlaps adjacent paragraph (Ctrl+Z to undo)</span>
+        </div>
+      )}
+
       {/* Subtle Tooltip: Only shown above block on hover and hidden as soon as selected */}
-      {isHovered && !isSelected && (
+      {isHovered && !isSelected && !hasOverlapWarning && (
         <div className="absolute -top-6 left-0 z-50 flex items-center rounded bg-zinc-800/95 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-xs pointer-events-none select-none">
           Click to edit text
         </div>

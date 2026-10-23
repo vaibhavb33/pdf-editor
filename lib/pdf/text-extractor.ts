@@ -288,7 +288,51 @@ export async function extractPageText(
     }
   }
 
-  // Step 2: Detect paragraphs vs fallback line mode (tables, headings, scattered labels)
+  // Step 2: Detect paragraph boundaries BEFORE merging lines.
+  // Start a new paragraph when any of these is true:
+  // 1. Vertical gap > 1.28x page median line gap (or > 1.35x avg font size)
+  // 2. Next line has a first-line indent (indent relative to column left)
+  // 3. Previous line ended well short of the right edge of the column and next line starts at left margin
+  // 4. Font size or heading style changes for the whole line
+  // 5. Significant horizontal jump or abnormal vertical gap
+
+  // Precompute page median line gap from consecutive lines
+  const pageLineGaps: number[] = [];
+  for (let i = 0; i < lines.length - 1; i++) {
+    const l1 = lines[i];
+    const l2 = lines[i + 1];
+    const gap = l1.ty - l2.ty;
+    const avgFz = (l1.fontSize + l2.fontSize) / 2;
+    if (gap >= avgFz * 0.7 && gap <= avgFz * 3.5) {
+      pageLineGaps.push(gap);
+    }
+  }
+  const pageMedianLineGap =
+    pageLineGaps.length > 0 ? median(pageLineGaps) : (lines[0]?.fontSize || 12) * 1.25;
+
+  // Identify the dominant column left margin on the page
+  const leftBuckets = new Map<number, number>();
+  for (const l of lines) {
+    if (!l.text.trim()) continue;
+    const bucket = Math.round(l.tx * 0.5) * 2; // cluster within 2pt
+    leftBuckets.set(bucket, (leftBuckets.get(bucket) || 0) + 1);
+  }
+  let dominantColLeft = lines[0]?.tx || 0;
+  let maxLeftCount = 0;
+  for (const [bucket, count] of leftBuckets.entries()) {
+    if (count > maxLeftCount) {
+      maxLeftCount = count;
+      dominantColLeft = bucket;
+    }
+  }
+
+  // Identify column right edge from substantial lines
+  const substantialLines = lines.filter((l) => l.text.trim().length > 25 || l.width > 120);
+  const colRight =
+    substantialLines.length > 0
+      ? median(substantialLines.map((l) => l.endX))
+      : Math.max(...lines.map((l) => l.endX), dominantColLeft + 200);
+
   interface RawParagraph {
     lines: LineRunItem[];
     isLineMode: boolean;
@@ -307,37 +351,52 @@ export async function extractPageText(
       const deltaY = prevLine.ty - curLine.ty;
       const avgFontSize = (prevLine.fontSize + curLine.fontSize) / 2;
 
-      // Vertical line spacing: normal paragraph line delta Y is between 0.85x and 1.85x font size
-      const isNormalLineSpacing = deltaY >= avgFontSize * 0.85 && deltaY <= avgFontSize * 1.85;
+      // Rule 1: Vertical gap is clearly larger than normal line height
+      const isLargeVerticalGap = deltaY > Math.max(pageMedianLineGap * 1.28, avgFontSize * 1.35);
 
-      // Font size consistency
-      const isSimilarFontSize = Math.abs(prevLine.fontSize - curLine.fontSize) <= 1.5;
+      // Rule 2: Next line has a first-line indent
+      // (curLine starts further right than dominant column margin or previous line by >= 6pt)
+      const isFirstLineIndent =
+        (curLine.tx - dominantColLeft >= 6.0 || curLine.tx - prevLine.tx >= 6.0) &&
+        curLine.tx < colRight - 40;
 
-      // Horizontal alignment: lines share a common column margin or first-line indent
-      const isColAligned = Math.abs(prevLine.tx - curLine.tx) <= Math.max(36, avgFontSize * 3.5);
+      // Rule 3: Previous line ended well short of column right edge (sentence/paragraph ended)
+      // and current line starts back at the column left margin
+      const prevLineEndedShort = prevLine.endX < colRight - 32 && prevLine.width > 30;
+      const curStartsAtLeftMargin =
+        Math.abs(curLine.tx - dominantColLeft) <= 4.0 ||
+        Math.abs(curLine.tx - Math.min(prevLine.tx, dominantColLeft)) <= 4.0;
+      const isBreakByShortLineEnd = prevLineEndedShort && curStartsAtLeftMargin;
 
-      // Avoid merging if previous line is a short heading / title
-      const isPrevShortTitle =
-        prevLine.text.length < 25 &&
-        prevLine.endX < curLine.endX - 60 &&
-        deltaY > avgFontSize * 1.35;
+      // Rule 4: Font size or heading/bold weight changes for the whole line
+      const fontSizeDiffers = Math.abs(curLine.fontSize - prevLine.fontSize) >= 1.5;
+      const prevIsAllBold = prevLine.runs.every((r) => r.isBold);
+      const curIsAllBold = curLine.runs.every((r) => r.isBold);
+      const isHeadingStyleChange =
+        prevIsAllBold !== curIsAllBold && (prevLine.text.length < 50 || curLine.text.length < 50);
 
-      // Avoid merging if current line is isolated or significantly different
-      const isTableGridCell = curLine.width < 80 && prevLine.width < 80 && Math.abs(curLine.tx - prevLine.tx) > 20;
+      // Rule 5: Abnormal vertical gap (negative deltaY or distant lines)
+      const isAbnormalGap = deltaY < avgFontSize * 0.4 || deltaY > avgFontSize * 3.8;
 
-      canGroupWithPrev =
-        isNormalLineSpacing &&
-        isSimilarFontSize &&
-        isColAligned &&
-        !isPrevShortTitle &&
-        !isTableGridCell;
+      // Rule 6: Horizontal distance (not an indent)
+      const isColMisaligned = Math.abs(curLine.tx - prevLine.tx) > Math.max(36, avgFontSize * 3.0);
+
+      const isParagraphBreak =
+        isLargeVerticalGap ||
+        isFirstLineIndent ||
+        isBreakByShortLineEnd ||
+        fontSizeDiffers ||
+        isHeadingStyleChange ||
+        isAbnormalGap ||
+        isColMisaligned;
+
+      // Merging condition: must NOT trigger any paragraph break rule
+      canGroupWithPrev = !isParagraphBreak;
     }
 
     if (canGroupWithPrev && lastPara) {
       lastPara.lines.push(curLine);
     } else {
-      // Determine if this line should be treated as line mode or potential paragraph
-      // If line is very short or looks like table header/cell, set isLineMode
       paragraphs.push({
         lines: [curLine],
         isLineMode: false,
@@ -512,6 +571,15 @@ export async function extractPageText(
 
     const fontInfo = resolveFontDisplayInfo(dominantRun.fontFamily, dominantRun.fontFamily, dominantRun.fontCategory);
 
+    let paragraphSpacing: number | undefined;
+    if (idx < paragraphs.length - 1) {
+      const nextTopBaseline = paragraphs[idx + 1].lines[0].ty;
+      const rawGap = bottomBaseline - nextTopBaseline;
+      if (rawGap > 0) {
+        paragraphSpacing = Math.round(rawGap * 10) / 10;
+      }
+    }
+
     const layout: ParagraphLayout = {
       columnX,
       columnWidth,
@@ -519,6 +587,7 @@ export async function extractPageText(
       lineHeight: baselineLineHeight,
       textAlign,
       isLineMode: isSingleLine,
+      paragraphSpacing,
     };
 
     return {

@@ -1,7 +1,17 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { siteConfig, companyLinks } from "@/content/site";
 
 export function Footer() {
+  const pathname = usePathname();
+
+  // The site footer must NOT render inside the editor route to avoid overlap and pushing
+  if (pathname === "/edit-pdf" || pathname?.startsWith("/edit-pdf")) {
+    return null;
+  }
+
   return (
     <footer
       id="site-footer"

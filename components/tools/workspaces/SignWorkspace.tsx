@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Dropzone } from "@/components/ui/Dropzone";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ResultCard } from "@/components/ui/ResultCard";
@@ -31,61 +31,117 @@ export function SignWorkspace() {
     }
   };
 
-  // Canvas drawing handlers
-  useEffect(() => {
-    if (signMode !== "draw") return;
+  const lastPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const hasStrokes = useRef<boolean>(false);
+
+  // Initialize and resize canvas with true CSS dimensions and Retina devicePixelRatio
+  const initCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
     ctx.strokeStyle = "#1e293b";
     ctx.lineWidth = 2.5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-  }, [signMode]);
+  }, []);
 
-  const startDraw = (
-    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
-  ) => {
+  useEffect(() => {
+    if (signMode !== "draw") return;
+    // Initial setup with slight delay for container layout
+    const timer = setTimeout(initCanvas, 50);
+
+    const handleResize = () => {
+      // Re-init on window resize
+      initCanvas();
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [signMode, initCanvas]);
+
+  const getPointerPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    };
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+
     isDrawing.current = true;
+    hasStrokes.current = true;
+    const pos = getPointerPos(e);
+    lastPos.current = pos;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = "touches" in e ? e.touches[0].clientX - rect.left : e.clientX - rect.left;
-    const y = "touches" in e ? e.touches[0].clientY - rect.top : e.clientY - rect.top;
 
     ctx.beginPath();
-    ctx.moveTo(x, y);
+    ctx.moveTo(pos.x, pos.y);
   };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawing.current) return;
+    e.preventDefault();
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const x = "touches" in e ? e.touches[0].clientX - rect.left : e.clientX - rect.left;
-    const y = "touches" in e ? e.touches[0].clientY - rect.top : e.clientY - rect.top;
+    const cur = getPointerPos(e);
+    const midX = (lastPos.current.x + cur.x) / 2;
+    const midY = (lastPos.current.y + cur.y) / 2;
 
-    ctx.lineTo(x, y);
+    ctx.quadraticCurveTo(lastPos.current.x, lastPos.current.y, midX, midY);
     ctx.stroke();
+
+    lastPos.current = cur;
   };
 
-  const stopDraw = () => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawing.current) return;
     isDrawing.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
   };
 
   const clearCanvas = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
-    ctx?.clearRect(0, 0, canvas.width, canvas.height);
+    if (!ctx) return;
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+    hasStrokes.current = false;
   };
 
   const generateSignatureDataUrl = (): string => {
@@ -111,6 +167,50 @@ export function SignWorkspace() {
     // Draw mode
     const canvas = canvasRef.current;
     if (canvas) {
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        try {
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imgData.data;
+          let minX = canvas.width;
+          let minY = canvas.height;
+          let maxX = 0;
+          let maxY = 0;
+          let found = false;
+
+          for (let y = 0; y < canvas.height; y++) {
+            for (let x = 0; x < canvas.width; x++) {
+              const alpha = data[(y * canvas.width + x) * 4 + 3];
+              if (alpha > 15) {
+                found = true;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+              }
+            }
+          }
+
+          if (found && maxX > minX && maxY > minY) {
+            const pad = 12;
+            const cropX = Math.max(0, minX - pad);
+            const cropY = Math.max(0, minY - pad);
+            const cropW = Math.min(canvas.width - cropX, maxX - minX + pad * 2);
+            const cropH = Math.min(canvas.height - cropY, maxY - minY + pad * 2);
+
+            const trimmedCanvas = document.createElement("canvas");
+            trimmedCanvas.width = cropW;
+            trimmedCanvas.height = cropH;
+            const trimmedCtx = trimmedCanvas.getContext("2d");
+            if (trimmedCtx) {
+              trimmedCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+              return trimmedCanvas.toDataURL("image/png");
+            }
+          }
+        } catch {
+          // fallback to full canvas
+        }
+      }
       return canvas.toDataURL("image/png");
     }
     throw new Error("No signature created.");
@@ -250,27 +350,28 @@ export function SignWorkspace() {
             {/* Mode 1: Draw Pad */}
             {signMode === "draw" && (
               <div className="space-y-2">
-                <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-950">
+                <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white p-1 dark:border-zinc-700 dark:bg-zinc-950">
                   <canvas
                     ref={canvasRef}
-                    width={450}
-                    height={160}
-                    onMouseDown={startDraw}
-                    onMouseMove={draw}
-                    onMouseUp={stopDraw}
-                    onMouseLeave={stopDraw}
-                    onTouchStart={startDraw}
-                    onTouchMove={draw}
-                    onTouchEnd={stopDraw}
-                    className="h-36 w-full cursor-crosshair touch-none rounded-xl border border-dashed border-zinc-200 bg-white dark:border-zinc-800"
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
+                    className="h-60 sm:h-64 w-full cursor-crosshair touch-none rounded-xl border border-dashed border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
                   />
+                  {/* Visual signing baseline guideline */}
+                  <div className="pointer-events-none absolute bottom-10 left-6 right-6 border-b border-dashed border-zinc-300 dark:border-zinc-700">
+                    <span className="absolute -top-3.5 left-0 text-[10px] font-medium text-zinc-400 select-none dark:text-zinc-500">
+                      Sign above this line ✕
+                    </span>
+                  </div>
                 </div>
                 <div className="flex items-center justify-between text-xs text-zinc-500">
-                  <span>Sign inside the box using mouse or finger</span>
+                  <span>Draw your signature above using mouse, touch, or stylus pen</span>
                   <button
                     type="button"
                     onClick={clearCanvas}
-                    className="min-h-[44px] cursor-pointer px-2 font-semibold text-rose-600"
+                    className="min-h-[44px] cursor-pointer px-2 font-semibold text-rose-600 hover:text-rose-700"
                   >
                     Clear pad
                   </button>

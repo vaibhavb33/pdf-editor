@@ -75,6 +75,21 @@ export default async function ToolPage({ params }: ToolPageProps) {
     .filter((t): t is ToolDefinition => Boolean(t))
     .slice(0, 4);
 
+  // Dedicated Fixed App-Shell Layout for Edit PDF:
+  // Fills remaining viewport (100dvh - 4rem header) with zero page-level scroll,
+  // omitting marketing sections and footer to prevent layout overlap/pushing.
+  if (tool.slug === "edit-pdf") {
+    return (
+      <div className="flex h-[calc(100dvh-4rem)] w-full flex-col min-h-0 overflow-hidden">
+        <JsonLd data={appSchema} />
+        {howToSchema && <JsonLd data={howToSchema} />}
+        {faqSchema && <JsonLd data={faqSchema} />}
+        <JsonLd data={breadcrumbSchema} />
+        <ToolWorkspaceController slug="edit-pdf" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col pb-20">
       <JsonLd data={appSchema} />

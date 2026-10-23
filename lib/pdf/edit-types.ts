@@ -32,6 +32,7 @@ export interface ParagraphLayout {
   isLineMode: boolean; // if true, paragraph grouping confidence was low; each line is isolated
   letterSpacing?: number;
   wordSpacing?: number;
+  paragraphSpacing?: number; // in pt (vertical gap to next paragraph)
 }
 
 export interface OriginalLine {

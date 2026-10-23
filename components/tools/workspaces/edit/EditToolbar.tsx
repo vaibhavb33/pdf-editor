@@ -93,10 +93,10 @@ export function EditToolbar({
       id="edit-pdf-toolbar"
       role="toolbar"
       aria-label="PDF Word-Style Ribbon Toolbar"
-      className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 shadow-xs dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
+      className="relative z-20 flex h-12 w-full shrink-0 flex-nowrap items-center justify-between gap-3 border-b border-zinc-200 bg-white px-3 text-xs text-zinc-700 shadow-xs overflow-x-auto scrollbar-none select-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
     >
       {/* Left group: Word-like Ribbon Tools */}
-      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         {/* Add Text Tool */}
         <button
           type="button"

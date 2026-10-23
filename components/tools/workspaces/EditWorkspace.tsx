@@ -5,7 +5,7 @@ import { Dropzone } from "@/components/ui/Dropzone";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ResultCard } from "@/components/ui/ResultCard";
 import { useToast } from "@/components/ui/Toast";
-import { FontChoice, TextBlock } from "@/lib/pdf/edit-types";
+import { FontChoice, TextBlock, TextRun } from "@/lib/pdf/edit-types";
 import { extractPageText } from "@/lib/pdf/text-extractor";
 import { applyPdfEdits } from "@/lib/pdf/edit-engine";
 import { createDownloadBlob } from "@/lib/pdf/types";
@@ -30,9 +30,26 @@ export function EditWorkspace() {
   // Editor navigation & view state
   const [currentPage, setCurrentPage] = useState<number>(0);
   const [scale, setScale] = useState<number>(1.2);
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [pageSizes, setPageSizes] = useState<{ width: number; height: number }[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return window.innerWidth >= 768;
+    }
+    return true;
+  });
   const [isAddTextActive, setIsAddTextActive] = useState<boolean>(false);
   const [isScannedPdf, setIsScannedPdf] = useState<boolean>(false);
+
+  // Responsive sidebar collapse on resize
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        setIsSidebarOpen(false);
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // Loading & export states
   const [isLoadingPdf, setIsLoadingPdf] = useState<boolean>(false);
@@ -82,13 +99,19 @@ export function EditWorkspace() {
       setPdfDoc(doc);
       setNumPages(doc.numPages);
 
-      // Extract text blocks for all pages
+      // Extract text blocks and native unscaled page dimensions for all pages
       const allBlocks: TextBlock[] = [];
+      const extractedSizes: { width: number; height: number }[] = [];
+
       for (let i = 0; i < doc.numPages; i++) {
         const page = await doc.getPage(i + 1);
+        const vp = page.getViewport({ scale: 1.0 });
+        extractedSizes.push({ width: Math.floor(vp.width), height: Math.floor(vp.height) });
         const pageData = await extractPageText(page, i, 1.0);
         allBlocks.push(...pageData.blocks);
       }
+
+      setPageSizes(extractedSizes);
 
       if (allBlocks.length === 0) {
         setIsScannedPdf(true);
@@ -349,12 +372,50 @@ export function EditWorkspace() {
     const textBefore = fullText.slice(0, caretOffset).trimEnd();
     const textAfter = fullText.slice(caretOffset).trimStart() || " ";
 
+    // Partition runs across split point
+    const runsBefore: TextRun[] = [];
+    const runsAfter: TextRun[] = [];
+    let curOffset = 0;
+
+    for (const r of block.runs || []) {
+      const rLen = r.text.length;
+      if (curOffset + rLen <= caretOffset) {
+        runsBefore.push(r);
+      } else if (curOffset >= caretOffset) {
+        runsAfter.push(r);
+      } else {
+        const splitInRun = caretOffset - curOffset;
+        const partBefore = r.text.slice(0, splitInRun);
+        const partAfter = r.text.slice(splitInRun);
+        if (partBefore) {
+          runsBefore.push({ ...r, id: `${r.id}_a`, text: partBefore });
+        }
+        if (partAfter) {
+          runsAfter.push({ ...r, id: `${r.id}_b`, text: partAfter });
+        }
+      }
+      curOffset += rLen;
+    }
+
+    const fallbackRunAfter: TextRun = {
+      id: `run_${Date.now()}_split`,
+      text: textAfter,
+      fontFamily: block.fontFamily,
+      fontCategory: block.fontCategory,
+      fontSize: block.fontSize,
+      isBold: block.isBold,
+      isItalic: block.isItalic,
+      isUnderline: block.isUnderline,
+      color: block.color,
+    };
+
     const newBlockId = `split_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const lineGap = block.layout?.lineHeight || block.fontSize * 1.25;
 
     const updatedBlock: TextBlock = {
       ...block,
       currentText: textBefore,
+      runs: runsBefore.length > 0 ? runsBefore : [{ ...fallbackRunAfter, text: textBefore }],
       isEdited: true,
     };
 
@@ -363,6 +424,7 @@ export function EditWorkspace() {
       id: newBlockId,
       originalText: "",
       currentText: textAfter,
+      runs: runsAfter.length > 0 ? runsAfter : [fallbackRunAfter],
       y: block.y - lineGap,
       pdfBounds: {
         ...block.pdfBounds,
@@ -401,9 +463,12 @@ export function EditWorkspace() {
     if (prevBlock.pageIndex !== block.pageIndex || prevBlock.isDeleted) return;
 
     const mergedText = prevBlock.currentText + " " + block.currentText;
+    const mergedRuns = [...(prevBlock.runs || []), ...(block.runs || [])];
+
     const updatedPrevBlock: TextBlock = {
       ...prevBlock,
       currentText: mergedText,
+      runs: mergedRuns,
       isEdited: true,
     };
     const updatedCurrentBlock: TextBlock = {
@@ -505,11 +570,11 @@ export function EditWorkspace() {
     setIsScannedPdf(false);
   };
 
-  // If no file loaded yet, render clean dropzone
+  // If no file loaded yet, render clean dropzone centered in the viewport
   if (!file || !pdfDoc) {
     return (
-      <div className="w-full py-8">
-        <div className="mx-auto max-w-2xl">
+      <div className="flex h-full w-full min-h-0 flex-col items-center justify-center p-4">
+        <div className="mx-auto w-full max-w-2xl">
           <Dropzone
             onFilesSelected={handleFiles}
             maxFiles={1}
@@ -529,9 +594,9 @@ export function EditWorkspace() {
     );
   }
 
-  // Full Editor View
+  // Full Fixed App-Shell Editor View
   return (
-    <div className="flex h-[calc(100vh-140px)] min-h-[600px] w-full flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xs dark:border-zinc-800 dark:bg-zinc-950">
+    <div className="flex h-full w-full min-h-0 flex-col overflow-hidden bg-zinc-100 select-none dark:bg-zinc-950">
       {/* Top Word-Style Ribbon Toolbar */}
       <EditToolbar
         selectedBlock={selectedBlock}
@@ -566,7 +631,7 @@ export function EditWorkspace() {
       {isScannedPdf && (
         <div
           role="alert"
-          className="flex items-center justify-between border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+          className="flex shrink-0 items-center justify-between border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
         >
           <div className="flex items-center gap-2">
             <svg className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -599,7 +664,7 @@ export function EditWorkspace() {
       )}
 
       {/* Main Workspace Area (Left Thumbnail Sidebar + Center Scrollable Pages Canvas) */}
-      <div className="relative flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 min-h-0 overflow-hidden">
         {/* Left Thumbnails Sidebar */}
         <EditThumbnailSidebar
           pdfDoc={pdfDoc}
@@ -619,15 +684,21 @@ export function EditWorkspace() {
               setActiveFormatting(null);
             }
           }}
-          className="flex-1 overflow-y-auto overflow-x-auto bg-zinc-100 p-4 sm:p-8 dark:bg-zinc-900/50"
+          style={{
+            overscrollBehavior: "contain",
+            scrollPaddingTop: "24px",
+            scrollPaddingBottom: "36px",
+          }}
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-auto bg-zinc-100 px-4 py-8 sm:px-8 sm:py-10 dark:bg-zinc-950"
         >
-          <div className="mx-auto flex flex-col items-center">
+          <div className="mx-auto flex flex-col items-center gap-6 pb-8">
             {Array.from({ length: numPages }).map((_, i) => (
               <EditPageCanvas
                 key={i}
                 pdfDoc={pdfDoc}
                 pageIndex={i}
                 scale={scale}
+                initialPageSize={pageSizes[i]}
                 blocks={blocks.filter((b) => b.pageIndex === i)}
                 selectedBlockId={selectedBlockId}
                 onSelectBlock={(id) => {
@@ -647,6 +718,75 @@ export function EditWorkspace() {
           </div>
         </main>
       </div>
+
+      {/* Docked Status Bar (Fixed at bottom outside scrollable area) */}
+      <footer
+        id="edit-pdf-status-bar"
+        aria-label="Document Status Bar"
+        className="flex h-9 shrink-0 items-center justify-between border-t border-zinc-200 bg-white px-3 text-xs text-zinc-600 select-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+      >
+        <div className="flex items-center gap-3">
+          <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+            Page {currentPage + 1} of {numPages}
+          </span>
+          <span className="hidden sm:inline text-zinc-300 dark:text-zinc-700">•</span>
+          <span className="hidden sm:inline text-zinc-500 dark:text-zinc-400">
+            {blocks.filter((b) => !b.isDeleted).length} editable text blocks
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 text-[11px]">
+          {isExporting ? (
+            <span className="flex items-center gap-1.5 font-medium text-blue-600">
+              <span className="h-2 w-2 animate-ping rounded-full bg-blue-600" />
+              Saving changes...
+            </span>
+          ) : historyIndex > 0 ? (
+            <span className="text-zinc-500 dark:text-zinc-400">
+              {history.length - 1} edit{history.length - 1 > 1 ? "s" : ""} recorded
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+              ✓ Ready
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleZoomOut}
+            className="flex h-6 w-6 items-center justify-center rounded text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            title="Zoom out"
+          >
+            -
+          </button>
+          <button
+            type="button"
+            onClick={handleResetZoom}
+            className="px-1 text-xs font-semibold text-zinc-700 hover:text-blue-600 dark:text-zinc-300"
+            title="Reset Zoom to 100%"
+          >
+            {Math.round(scale * 100)}%
+          </button>
+          <button
+            type="button"
+            onClick={handleZoomIn}
+            className="flex h-6 w-6 items-center justify-center rounded text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            title="Zoom in"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={handleFitWidth}
+            className="ml-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+            title="Fit document to screen width"
+          >
+            Fit
+          </button>
+        </div>
+      </footer>
 
       {/* Export Result Footer if generated */}
       {result && (
