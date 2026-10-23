@@ -1,7 +1,8 @@
 "use client";
 
-import React from "react";
-import { FontChoice, TextAlign, TextBlock } from "@/lib/pdf/edit-types";
+import React, { useState } from "react";
+import { FontChoice, TextAlign, TextBlock, FontDetectionMetadata } from "@/lib/pdf/edit-types";
+import { FontFamilyPicker } from "./FontFamilyPicker";
 
 export interface ActiveFormattingState {
   fontFamily: string;
@@ -14,6 +15,7 @@ export interface ActiveFormattingState {
   color: { r: number; g: number; b: number };
   isSubstituted?: boolean;
   substitutedFontName?: string;
+  detection?: FontDetectionMetadata;
 }
 
 interface EditToolbarProps {
@@ -37,6 +39,8 @@ interface EditToolbarProps {
   totalPages: number;
   onDownload: () => void;
   isSaving: boolean;
+  documentBlocks?: TextBlock[];
+  onOpenPageBorder?: () => void;
 }
 
 const COLOR_SWATCHES = [
@@ -47,6 +51,9 @@ const COLOR_SWATCHES = [
   { label: "Green", hex: "#16A34A", rgb: { r: 0.09, g: 0.64, b: 0.29 } },
   { label: "Amber", hex: "#D97706", rgb: { r: 0.85, g: 0.47, b: 0.02 } },
 ];
+
+const FONT_SIZE_PRESETS = [6, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72, 96];
+const LINE_SPACING_PRESETS = [1.0, 1.15, 1.5, 2.0];
 
 export function EditToolbar({
   selectedBlock,
@@ -69,7 +76,11 @@ export function EditToolbar({
   totalPages,
   onDownload,
   isSaving,
+  documentBlocks = [],
+  onOpenPageBorder,
 }: EditToolbarProps) {
+  const [isLineSpacingOpen, setIsLineSpacingOpen] = useState(false);
+
   // Use caret formatting if available, otherwise block or default
   const fmt = activeFormatting || (selectedBlock ? {
     fontFamily: selectedBlock.fontFamily,
@@ -82,6 +93,7 @@ export function EditToolbar({
     color: selectedBlock.color,
     isSubstituted: selectedBlock.isSubstitutedFont,
     substitutedFontName: selectedBlock.substitutedFontName,
+    detection: selectedBlock.detection,
   } : null);
 
   const hexColor = fmt
@@ -100,6 +112,7 @@ export function EditToolbar({
         {/* Add Text Tool */}
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={onToggleAddText}
           aria-pressed={isAddTextActive}
           className={`flex min-h-[34px] items-center gap-1.5 rounded-lg px-2.5 font-semibold transition-colors ${
@@ -114,6 +127,22 @@ export function EditToolbar({
           </svg>
           <span>Add Text</span>
         </button>
+
+        {/* Page Border Tool */}
+        {onOpenPageBorder && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onOpenPageBorder}
+            className="flex min-h-[34px] items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 font-medium text-zinc-700 hover:bg-zinc-100 hover:text-blue-600 dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+            title="Configure Page Border (Style, width, color, scope)"
+          >
+            <svg className="h-4 w-4 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth={2} strokeDasharray="3 3" />
+            </svg>
+            <span>Border</span>
+          </button>
+        )}
 
         {/* Undo / Redo */}
         <div className="flex items-center rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-800/50">
@@ -147,58 +176,50 @@ export function EditToolbar({
 
         {/* Typography & Formatting Controls (always responsive to active selection / caret) */}
         <div className="flex flex-wrap items-center gap-1.5 border-l border-zinc-200 pl-2 dark:border-zinc-800">
-          {/* Font Family Dropdown */}
-          <div className="relative flex items-center">
-            <select
-              value={fmt?.fontCategory || "sans-serif"}
-              disabled={!selectedBlock}
-              onChange={(e) => {
-                const val = e.target.value as FontChoice;
-                let familyName = "Arial";
-                if (val === "calibri") familyName = "Calibri";
-                else if (val === "cambria") familyName = "Cambria";
-                else if (val === "serif") familyName = "Times New Roman";
-                else if (val === "monospace") familyName = "Courier New";
-                else if (val === "devanagari") familyName = "Noto Sans Devanagari";
-                else if (val === "gujarati") familyName = "Noto Sans Gujarati";
-                else if (val === "roboto") familyName = "Roboto";
+          {/* Custom Grouped Font Family Dropdown with Live Previews & Search */}
+          <FontFamilyPicker
+            currentFamily={fmt?.fontFamily || "Arial"}
+            currentCategory={fmt?.fontCategory}
+            fontSize={fmt?.fontSize}
+            disabled={!selectedBlock}
+            documentBlocks={documentBlocks}
+            onSelectFont={async ({ family, category }) => {
+              onApplyFormatting({
+                fontFamily: family,
+                fontCategory: category,
+                isSubstitutedFont: category === "calibri" || category === "cambria" || category === "serif" || category === "monospace",
+                substitutedFontName: category === "calibri" ? "Carlito" : category === "cambria" ? "Caladea" : category === "serif" ? "Liberation Serif" : undefined,
+                userOverride: true,
+              });
+            }}
+          />
 
-                onApplyFormatting({
-                  fontCategory: val,
-                  fontFamily: familyName,
-                  isSubstitutedFont: val === "calibri" || val === "cambria" || val === "serif" || val === "monospace" || val === "sans-serif",
-                  substitutedFontName:
-                    val === "calibri" ? "Carlito" : val === "cambria" ? "Caladea" : val === "serif" ? "Liberation Serif" : "Liberation Sans",
-                });
-              }}
-              aria-label="Font Family"
-              className="min-h-[34px] rounded-lg border border-zinc-200 bg-white px-2 pr-7 text-xs font-medium text-zinc-800 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
-            >
-              <option value="sans-serif">Arial / Helvetica (Liberation Sans)</option>
-              <option value="calibri">Calibri (Carlito)</option>
-              <option value="cambria">Cambria (Caladea)</option>
-              <option value="serif">Times New Roman (Liberation Serif)</option>
-              <option value="monospace">Courier New (Liberation Mono)</option>
-              <option value="roboto">Roboto</option>
-              <option value="devanagari">Devanagari / Hindi</option>
-              <option value="gujarati">Gujarati</option>
-            </select>
-          </div>
-
-          {/* Substituted Font Badge */}
-          {fmt?.isSubstituted && (
-            <span
-              className="hidden lg:inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
-              title={`Using metric-compatible open-source font: ${fmt.substitutedFontName || "Substitute font"}`}
-            >
-              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span>{fmt.substitutedFontName ? fmt.substitutedFontName.split(" ")[0] : "Substituted"}</span>
-            </span>
+          {/* Detected / Substituted Font Badge */}
+          {fmt && (
+            fmt.detection?.isExact ? (
+              <span
+                className="hidden xl:inline-flex items-center gap-1 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                title={`Exact font match: ${fmt.detection.normalizedFamily || fmt.fontFamily}`}
+              >
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>Detected: {fmt.detection.normalizedFamily || fmt.fontFamily}</span>
+              </span>
+            ) : fmt.isSubstituted || fmt.detection ? (
+              <span
+                className="hidden xl:inline-flex items-center gap-1 rounded bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
+                title={`Metric-compatible substituted font: ${fmt.detection?.mappedFont || fmt.substitutedFontName || "Substituted"}`}
+              >
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>Substituted: {fmt.detection?.mappedFont || fmt.substitutedFontName || "Substitute"}</span>
+              </span>
+            ) : null
           )}
 
-          {/* Font Size Input & Stepper */}
+          {/* Font Size Free Input + Steppers + Preset Dropdown */}
           <div className="flex items-center rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-800">
             <button
               type="button"
@@ -206,9 +227,9 @@ export function EditToolbar({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 if (!fmt) return;
-                onApplyFormatting({ fontSize: Math.max(6, Math.round(fmt.fontSize - 1)) });
+                onApplyFormatting({ fontSize: Math.max(6, Math.round(fmt.fontSize - 1)), userOverride: true });
               }}
-              className="flex h-8 w-6 items-center justify-center font-bold text-zinc-500 hover:text-zinc-800 disabled:opacity-40 dark:hover:text-zinc-200"
+              className="flex h-8 w-5 items-center justify-center font-bold text-zinc-500 hover:text-zinc-800 disabled:opacity-40 dark:hover:text-zinc-200"
               title="Decrease font size"
             >
               -
@@ -220,10 +241,10 @@ export function EditToolbar({
               onChange={(e) => {
                 const val = parseFloat(e.target.value);
                 if (!isNaN(val) && val >= 4 && val <= 144) {
-                  onApplyFormatting({ fontSize: val });
+                  onApplyFormatting({ fontSize: val, userOverride: true });
                 }
               }}
-              className="h-8 w-10 text-center text-xs font-semibold outline-hidden [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              className="h-8 w-9 text-center text-xs font-semibold outline-hidden [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               title="Font size (pt)"
             />
             <button
@@ -232,13 +253,33 @@ export function EditToolbar({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 if (!fmt) return;
-                onApplyFormatting({ fontSize: Math.min(96, Math.round(fmt.fontSize + 1)) });
+                onApplyFormatting({ fontSize: Math.min(96, Math.round(fmt.fontSize + 1)), userOverride: true });
               }}
-              className="flex h-8 w-6 items-center justify-center font-bold text-zinc-500 hover:text-zinc-800 disabled:opacity-40 dark:hover:text-zinc-200"
+              className="flex h-8 w-5 items-center justify-center font-bold text-zinc-500 hover:text-zinc-800 disabled:opacity-40 dark:hover:text-zinc-200"
               title="Increase font size"
             >
               +
             </button>
+            {/* Quick Preset Size Dropdown */}
+            <select
+              value={fmt ? Math.round(fmt.fontSize) : 12}
+              disabled={!selectedBlock}
+              onMouseDown={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) {
+                  onApplyFormatting({ fontSize: val, userOverride: true });
+                }
+              }}
+              className="h-8 border-l border-zinc-200 bg-transparent px-1 text-[11px] font-medium text-zinc-600 outline-hidden dark:border-zinc-700 dark:text-zinc-400"
+              title="Select font size preset"
+            >
+              {FONT_SIZE_PRESETS.map((sz) => (
+                <option key={sz} value={sz}>
+                  {sz}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Bold, Italic, Underline buttons */}
@@ -248,7 +289,7 @@ export function EditToolbar({
               type="button"
               disabled={!selectedBlock}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onApplyFormatting({ isBold: !fmt?.isBold })}
+              onClick={() => onApplyFormatting({ isBold: !fmt?.isBold, userOverride: true })}
               aria-pressed={fmt?.isBold}
               className={`flex h-8 w-8 items-center justify-center rounded-l-lg font-bold transition-colors ${
                 fmt?.isBold
@@ -265,7 +306,7 @@ export function EditToolbar({
               type="button"
               disabled={!selectedBlock}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onApplyFormatting({ isItalic: !fmt?.isItalic })}
+              onClick={() => onApplyFormatting({ isItalic: !fmt?.isItalic, userOverride: true })}
               aria-pressed={fmt?.isItalic}
               className={`flex h-8 w-8 items-center justify-center border-l border-zinc-200 font-serif italic transition-colors dark:border-zinc-700 ${
                 fmt?.isItalic
@@ -282,7 +323,7 @@ export function EditToolbar({
               type="button"
               disabled={!selectedBlock}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onApplyFormatting({ isUnderline: !fmt?.isUnderline })}
+              onClick={() => onApplyFormatting({ isUnderline: !fmt?.isUnderline, userOverride: true })}
               aria-pressed={fmt?.isUnderline}
               className={`flex h-8 w-8 items-center justify-center border-l border-zinc-200 underline transition-colors dark:border-zinc-700 ${
                 fmt?.isUnderline
@@ -295,19 +336,19 @@ export function EditToolbar({
             </button>
           </div>
 
-          {/* Alignment: Left / Center / Right */}
+          {/* Alignment: Left / Center / Right / Justify */}
           <div className="flex items-center rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-800">
             <button
               type="button"
               disabled={!selectedBlock}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onApplyFormatting({ textAlign: "left" })}
-              className={`flex h-8 w-8 items-center justify-center rounded-l-lg ${
+              onClick={() => onApplyFormatting({ textAlign: "left", userOverride: true })}
+              className={`flex h-8 w-7 items-center justify-center rounded-l-lg ${
                 fmt?.textAlign === "left" || !fmt?.textAlign
                   ? "bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-300"
                   : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
               } disabled:opacity-40`}
-              title="Align Left"
+              title="Align Left (Ctrl+L)"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h14" />
@@ -317,13 +358,13 @@ export function EditToolbar({
               type="button"
               disabled={!selectedBlock}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onApplyFormatting({ textAlign: "center" })}
-              className={`flex h-8 w-8 items-center justify-center border-l border-zinc-200 dark:border-zinc-700 ${
+              onClick={() => onApplyFormatting({ textAlign: "center", userOverride: true })}
+              className={`flex h-8 w-7 items-center justify-center border-l border-zinc-200 dark:border-zinc-700 ${
                 fmt?.textAlign === "center"
                   ? "bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-300"
                   : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
               } disabled:opacity-40`}
-              title="Align Center"
+              title="Align Center (Ctrl+E)"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M7 12h10M5 18h14" />
@@ -333,16 +374,135 @@ export function EditToolbar({
               type="button"
               disabled={!selectedBlock}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onApplyFormatting({ textAlign: "right" })}
-              className={`flex h-8 w-8 items-center justify-center border-l border-zinc-200 rounded-r-lg dark:border-zinc-700 ${
+              onClick={() => onApplyFormatting({ textAlign: "right", userOverride: true })}
+              className={`flex h-8 w-7 items-center justify-center border-l border-zinc-200 dark:border-zinc-700 ${
                 fmt?.textAlign === "right"
                   ? "bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-300"
                   : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
               } disabled:opacity-40`}
-              title="Align Right"
+              title="Align Right (Ctrl+R)"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M10 12h10M6 18h14" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onApplyFormatting({ textAlign: "justify", userOverride: true })}
+              className={`flex h-8 w-7 items-center justify-center border-l border-zinc-200 rounded-r-lg dark:border-zinc-700 ${
+                fmt?.textAlign === "justify"
+                  ? "bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-300"
+                  : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              } disabled:opacity-40`}
+              title="Justify (Ctrl+J)"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Line Spacing Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setIsLineSpacingOpen((prev) => !prev)}
+              className="flex h-8 items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2 text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+              title="Line Spacing (1.0, 1.15, 1.5, 2.0)"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12M8 12h12M8 17h12M4 6v12m0 0l-2-2m2 2l2-2M4 6L2 8m2-2l2 2" />
+              </svg>
+              <span className="text-[11px] font-medium">
+                {selectedBlock?.lineHeight || 1.25}x
+              </span>
+            </button>
+            {isLineSpacingOpen && (
+              <div
+                onMouseDown={(e) => e.preventDefault()}
+                className="absolute left-0 top-full z-50 mt-1 w-28 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+              >
+                {LINE_SPACING_PRESETS.map((spacing) => (
+                  <button
+                    key={spacing}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      onApplyFormatting({ lineHeight: spacing, userOverride: true });
+                      setIsLineSpacingOpen(false);
+                    }}
+                    className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                  >
+                    <span>{spacing}x</span>
+                    {selectedBlock?.lineHeight === spacing && <span className="text-blue-600">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Indent Controls (Decrease / Increase Indent) */}
+          <div className="flex items-center rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-800">
+            <button
+              type="button"
+              disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                if (!selectedBlock) return;
+                const curIndent = selectedBlock.layout?.firstLineIndent || 0;
+                const newIndent = Math.max(0, curIndent - 12);
+                onApplyFormatting({
+                  layout: {
+                    ...(selectedBlock.layout || {
+                      columnX: selectedBlock.x,
+                      columnWidth: selectedBlock.pdfBounds.width,
+                      lineHeight: selectedBlock.fontSize * 1.25,
+                      textAlign: selectedBlock.textAlign || "left",
+                      isLineMode: false,
+                    }),
+                    firstLineIndent: newIndent,
+                  },
+                  userOverride: true,
+                });
+              }}
+              className="flex h-8 w-7 items-center justify-center rounded-l-lg text-zinc-600 hover:bg-zinc-100 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              title="Decrease First-Line Indent"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                if (!selectedBlock) return;
+                const curIndent = selectedBlock.layout?.firstLineIndent || 0;
+                const newIndent = Math.min(100, curIndent + 12);
+                onApplyFormatting({
+                  layout: {
+                    ...(selectedBlock.layout || {
+                      columnX: selectedBlock.x,
+                      columnWidth: selectedBlock.pdfBounds.width,
+                      lineHeight: selectedBlock.fontSize * 1.25,
+                      textAlign: selectedBlock.textAlign || "left",
+                      isLineMode: false,
+                    }),
+                    firstLineIndent: newIndent,
+                  },
+                  userOverride: true,
+                });
+              }}
+              className="flex h-8 w-7 items-center justify-center border-l border-zinc-200 rounded-r-lg text-zinc-600 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              title="Increase First-Line Indent"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
               </svg>
             </button>
           </div>
@@ -355,7 +515,7 @@ export function EditToolbar({
                 type="button"
                 disabled={!selectedBlock}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onApplyFormatting({ color: swatch.rgb })}
+                onClick={() => onApplyFormatting({ color: swatch.rgb, userOverride: true })}
                 style={{ backgroundColor: swatch.hex }}
                 className="h-5 w-5 rounded-md border border-black/10 transition-transform hover:scale-110 disabled:opacity-40"
                 title={swatch.label}
@@ -376,7 +536,7 @@ export function EditToolbar({
                   const r = parseInt(hex.slice(1, 3), 16) / 255;
                   const g = parseInt(hex.slice(3, 5), 16) / 255;
                   const b = parseInt(hex.slice(5, 7), 16) / 255;
-                  onApplyFormatting({ color: { r, g, b } });
+                  onApplyFormatting({ color: { r, g, b }, userOverride: true });
                 }}
                 className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
               />

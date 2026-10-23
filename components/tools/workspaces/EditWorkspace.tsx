@@ -5,13 +5,14 @@ import { Dropzone } from "@/components/ui/Dropzone";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ResultCard } from "@/components/ui/ResultCard";
 import { useToast } from "@/components/ui/Toast";
-import { FontChoice, TextBlock, TextRun } from "@/lib/pdf/edit-types";
+import { FontChoice, TextBlock, TextRun, PageBorderConfig } from "@/lib/pdf/edit-types";
 import { extractPageText } from "@/lib/pdf/text-extractor";
 import { applyPdfEdits } from "@/lib/pdf/edit-engine";
 import { createDownloadBlob } from "@/lib/pdf/types";
 import { EditToolbar, ActiveFormattingState } from "./edit/EditToolbar";
 import { EditThumbnailSidebar } from "./edit/EditThumbnailSidebar";
-import { EditPageCanvas } from "./edit/EditPageCanvas";
+import { EditPageCanvas, getCaretCharacterOffset } from "./edit/EditPageCanvas";
+import { PageBorderModal } from "./edit/PageBorderModal";
 
 export function EditWorkspace() {
   const [file, setFile] = useState<File | null>(null);
@@ -53,11 +54,24 @@ export function EditWorkspace() {
 
   // Loading & export states
   const [isLoadingPdf, setIsLoadingPdf] = useState<boolean>(false);
+  const [isDebugModalOpen, setIsDebugModalOpen] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportProgress, setExportProgress] = useState<number>(0);
   const [exportStage, setExportStage] = useState<string>("");
   const [result, setResult] = useState<{ url: string; size: number; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Page Border state
+  const [pageBorder, setPageBorder] = useState<PageBorderConfig>({
+    enabled: false,
+    style: "solid",
+    width: 1.5,
+    color: "#2563eb",
+    margin: 36,
+    cornerRadius: 0,
+    scope: "all",
+  });
+  const [isPageBorderModalOpen, setIsPageBorderModalOpen] = useState<boolean>(false);
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
@@ -95,7 +109,11 @@ export function EditWorkspace() {
         pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
       }
 
-      const doc = await pdfjs.getDocument({ data: buffer }).promise;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = await (pdfjs.getDocument as any)({
+        data: buffer,
+        fontExtraProperties: true,
+      }).promise;
       setPdfDoc(doc);
       setNumPages(doc.numPages);
 
@@ -170,6 +188,132 @@ export function EditWorkspace() {
     toast.info("Deleted", "Text block removed from document.");
   }, [selectedBlockId, blocks, pushHistory, toast]);
 
+  // Selected block
+  const selectedBlock = blocks.find((b) => b.id === selectedBlockId) || null;
+
+  // Apply formatting to selected block or active character range
+  const handleApplyFormatting = useCallback(
+    async (updates: Partial<TextBlock>) => {
+      if (!selectedBlockId) return;
+
+      // Preload font if fontFamily is specified to prevent browser layout reflow pops
+      if (updates.fontFamily && typeof document !== "undefined" && document.fonts) {
+        try {
+          const sz = updates.fontSize || selectedBlock?.fontSize || 12;
+          await document.fonts.load(`${sz}px "${updates.fontFamily}"`);
+        } catch {
+          // ignore font load errors
+        }
+      }
+
+      const targetBlock = blocks.find((b) => b.id === selectedBlockId);
+      if (!targetBlock) return;
+
+      let nextRuns: TextRun[] = targetBlock.runs ? [...targetBlock.runs] : [];
+      const sel = typeof window !== "undefined" ? window.getSelection() : null;
+      const hasSelection = Boolean(sel && !sel.isCollapsed && sel.rangeCount > 0);
+
+      if (hasSelection && targetBlock.runs && targetBlock.runs.length > 0) {
+        const activeEl = document.querySelector(
+          `[data-text-block="${selectedBlockId}"] [contenteditable="true"]`
+        ) as HTMLElement | null;
+
+        if (activeEl) {
+          const { start, end } = getCaretCharacterOffset(activeEl);
+          if (start < end) {
+            const newRuns: TextRun[] = [];
+            let curOffset = 0;
+
+            for (const run of targetBlock.runs) {
+              const rLen = run.text.length;
+              const rStart = curOffset;
+              const rEnd = curOffset + rLen;
+
+              if (rEnd <= start || rStart >= end) {
+                newRuns.push(run);
+              } else {
+                const sliceStart = Math.max(0, start - rStart);
+                const sliceEnd = Math.min(rLen, end - rStart);
+
+                const partBefore = run.text.slice(0, sliceStart);
+                const partSelected = run.text.slice(sliceStart, sliceEnd);
+                const partAfter = run.text.slice(sliceEnd);
+
+                if (partBefore) {
+                  newRuns.push({ ...run, id: `${run.id}_0`, text: partBefore });
+                }
+                if (partSelected) {
+                  newRuns.push({
+                    ...run,
+                    id: `${run.id}_sel_${Date.now()}`,
+                    text: partSelected,
+                    ...(updates.fontFamily && { fontFamily: updates.fontFamily }),
+                    ...(updates.fontCategory && { fontCategory: updates.fontCategory }),
+                    ...(updates.fontSize && { fontSize: updates.fontSize }),
+                    ...(updates.isBold !== undefined && { isBold: updates.isBold }),
+                    ...(updates.isItalic !== undefined && { isItalic: updates.isItalic }),
+                    ...(updates.isUnderline !== undefined && { isUnderline: updates.isUnderline }),
+                    ...(updates.color && { color: updates.color }),
+                    userOverride: true,
+                    embeddedFontFamily: updates.fontFamily ? undefined : run.embeddedFontFamily,
+                  });
+                }
+                if (partAfter) {
+                  newRuns.push({ ...run, id: `${run.id}_2`, text: partAfter });
+                }
+              }
+              curOffset += rLen;
+            }
+            nextRuns = newRuns;
+          }
+        }
+      } else if (targetBlock.runs && targetBlock.runs.length > 0) {
+        nextRuns = targetBlock.runs.map((r) => ({
+          ...r,
+          ...(updates.fontFamily && { fontFamily: updates.fontFamily }),
+          ...(updates.fontCategory && { fontCategory: updates.fontCategory }),
+          ...(updates.fontSize && { fontSize: updates.fontSize }),
+          ...(updates.isBold !== undefined && { isBold: updates.isBold }),
+          ...(updates.isItalic !== undefined && { isItalic: updates.isItalic }),
+          ...(updates.isUnderline !== undefined && { isUnderline: updates.isUnderline }),
+          ...(updates.color && { color: updates.color }),
+          userOverride: true,
+          embeddedFontFamily: updates.fontFamily ? undefined : r.embeddedFontFamily,
+        }));
+      }
+
+      const nextBlocks = blocks.map((b) =>
+        b.id === selectedBlockId
+          ? {
+              ...b,
+              ...updates,
+              runs: nextRuns.length > 0 ? nextRuns : b.runs,
+              userOverride: true,
+              embeddedFontFamily: updates.fontFamily ? undefined : b.embeddedFontFamily,
+              isEdited: true,
+            }
+          : b
+      );
+      pushHistory(nextBlocks);
+
+      // Update active formatting state for toolbar
+      if (activeFormatting) {
+        setActiveFormatting({
+          ...activeFormatting,
+          ...(updates.fontFamily && { fontFamily: updates.fontFamily }),
+          ...(updates.fontCategory && { fontCategory: updates.fontCategory }),
+          ...(updates.fontSize && { fontSize: updates.fontSize }),
+          ...(updates.isBold !== undefined && { isBold: updates.isBold }),
+          ...(updates.isItalic !== undefined && { isItalic: updates.isItalic }),
+          ...(updates.isUnderline !== undefined && { isUnderline: updates.isUnderline }),
+          ...(updates.textAlign && { textAlign: updates.textAlign }),
+          ...(updates.color && { color: updates.color }),
+        });
+      }
+    },
+    [selectedBlockId, blocks, selectedBlock, pushHistory, activeFormatting]
+  );
+
   // Global Keyboard shortcuts (Ctrl+Z, Ctrl+Y, Delete)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -177,7 +321,11 @@ export function EditWorkspace() {
       const isInput =
         target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "D" || e.key === "d")) {
+        e.preventDefault();
+        setIsDebugModalOpen((prev) => !prev);
+        return;
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) {
           handleRedo();
@@ -187,7 +335,26 @@ export function EditWorkspace() {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
         e.preventDefault();
         handleRedo();
+      } else if ((e.ctrlKey || e.metaKey) && selectedBlockId) {
+        const k = e.key.toLowerCase();
+        if (k === "l") {
+          e.preventDefault();
+          handleApplyFormatting({ textAlign: "left", userOverride: true });
+        } else if (k === "e") {
+          e.preventDefault();
+          handleApplyFormatting({ textAlign: "center", userOverride: true });
+        } else if (k === "r") {
+          e.preventDefault();
+          handleApplyFormatting({ textAlign: "right", userOverride: true });
+        } else if (k === "j") {
+          e.preventDefault();
+          handleApplyFormatting({ textAlign: "justify", userOverride: true });
+        }
       } else if (e.key === "Escape") {
+        if (isDebugModalOpen) {
+          setIsDebugModalOpen(false);
+          return;
+        }
         setSelectedBlockId(null);
         setIsAddTextActive(false);
       } else if ((e.key === "Delete" || e.key === "Backspace") && !isInput && selectedBlockId) {
@@ -198,40 +365,14 @@ export function EditWorkspace() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleUndo, handleRedo, selectedBlockId, handleDeleteSelectedBlock]);
-
-  // Selected block
-  const selectedBlock = blocks.find((b) => b.id === selectedBlockId) || null;
-
-  // Apply formatting to selected block
-  const handleApplyFormatting = (updates: Partial<TextBlock>) => {
-    if (!selectedBlockId) return;
-    const nextBlocks = blocks.map((b) =>
-      b.id === selectedBlockId
-        ? {
-            ...b,
-            ...updates,
-            isEdited: true,
-          }
-        : b
-    );
-    pushHistory(nextBlocks);
-
-    // Update active formatting state for toolbar
-    if (activeFormatting) {
-      setActiveFormatting({
-        ...activeFormatting,
-        ...(updates.fontFamily && { fontFamily: updates.fontFamily }),
-        ...(updates.fontCategory && { fontCategory: updates.fontCategory }),
-        ...(updates.fontSize && { fontSize: updates.fontSize }),
-        ...(updates.isBold !== undefined && { isBold: updates.isBold }),
-        ...(updates.isItalic !== undefined && { isItalic: updates.isItalic }),
-        ...(updates.isUnderline !== undefined && { isUnderline: updates.isUnderline }),
-        ...(updates.textAlign && { textAlign: updates.textAlign }),
-        ...(updates.color && { color: updates.color }),
-      });
-    }
-  };
+  }, [
+    handleUndo,
+    handleRedo,
+    selectedBlockId,
+    handleDeleteSelectedBlock,
+    isDebugModalOpen,
+    handleApplyFormatting,
+  ]);
 
   // Clear formatting
   const handleClearFormatting = () => {
@@ -520,6 +661,7 @@ export function EditWorkspace() {
         fileData: fileBytes,
         blocks,
         outputFilename,
+        pageBorder,
         onProgress: (p, s) => {
           setExportProgress(p);
           setExportStage(s);
@@ -625,6 +767,8 @@ export function EditWorkspace() {
         totalPages={numPages}
         onDownload={handleDownload}
         isSaving={isExporting}
+        documentBlocks={blocks}
+        onOpenPageBorder={() => setIsPageBorderModalOpen(true)}
       />
 
       {/* Scanned PDF Warning Banner */}
@@ -713,6 +857,7 @@ export function EditWorkspace() {
                 onAddTextAtPoint={handleAddTextAtPoint}
                 onPageVisible={(idx) => setCurrentPage(idx)}
                 onCaretChange={(fmt) => setActiveFormatting(fmt)}
+                pageBorder={pageBorder}
               />
             ))}
           </div>
@@ -799,6 +944,114 @@ export function EditWorkspace() {
           />
         </div>
       )}
+
+      {/* Hidden Debug Panel (Ctrl+Shift+D) */}
+      {isDebugModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">
+                  Ctrl+Shift+D
+                </span>
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                  Font Detection &amp; Mapping Debugger (Page {currentPage + 1})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDebugModalOpen(false)}
+                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              <table className="w-full border-collapse text-left text-xs">
+                <thead>
+                  <tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-800/50">
+                    <th className="p-2 font-semibold">Text Snippet</th>
+                    <th className="p-2 font-semibold">Raw PDF.js Name</th>
+                    <th className="p-2 font-semibold">Normalized Family</th>
+                    <th className="p-2 font-semibold">Mapped Font</th>
+                    <th className="p-2 font-semibold">Status</th>
+                    <th className="p-2 font-semibold">Confidence</th>
+                    <th className="p-2 font-semibold">Flags</th>
+                    <th className="p-2 font-semibold">Embedded</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {blocks
+                    .filter((b) => b.pageIndex === currentPage && !b.isDeleted)
+                    .map((b) => (
+                      <tr key={b.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
+                        <td className="max-w-[140px] truncate p-2 font-mono text-[11px]" title={b.currentText}>
+                          {b.currentText.slice(0, 30) || "—"}
+                        </td>
+                        <td className="p-2 font-mono text-[11px] text-zinc-600 dark:text-zinc-400">
+                          {b.detection?.rawName || b.fontName || "—"}
+                        </td>
+                        <td className="p-2 font-semibold text-zinc-800 dark:text-zinc-200">
+                          {b.detection?.normalizedFamily || b.fontFamily}
+                        </td>
+                        <td className="p-2 text-zinc-700 dark:text-zinc-300">
+                          {b.detection?.mappedFont || b.substitutedFontName || b.fontFamily}
+                        </td>
+                        <td className="p-2">
+                          {b.detection?.isExact ? (
+                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                              Exact
+                            </span>
+                          ) : (
+                            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                              Substituted
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-2 font-mono">
+                          {Math.round((b.detection?.confidence ?? 0.8) * 100)}%
+                        </td>
+                        <td className="p-2 font-mono text-[10px] text-zinc-500">
+                          {[
+                            b.detection?.flags?.isSerif ? "Serif" : "Sans",
+                            b.detection?.flags?.isMonospace ? "Mono" : null,
+                            b.isBold ? "Bold" : null,
+                            b.isItalic ? "Italic" : null,
+                          ]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </td>
+                        <td className="p-2">
+                          {b.embeddedFontFamily ? (
+                            <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-semibold text-purple-800 dark:bg-purple-950 dark:text-purple-300">
+                              FontFace
+                            </span>
+                          ) : (
+                            <span className="text-zinc-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-t border-zinc-200 px-4 py-2 text-right text-[11px] text-zinc-500 dark:border-zinc-800">
+              Press <kbd className="rounded border bg-zinc-100 px-1 dark:bg-zinc-800">Esc</kbd> or click ✕ to close
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Page Border Settings Modal */}
+      <PageBorderModal
+        isOpen={isPageBorderModalOpen}
+        onClose={() => setIsPageBorderModalOpen(false)}
+        config={pageBorder}
+        currentPage={currentPage}
+        totalPages={numPages}
+        onChangeConfig={setPageBorder}
+        onRemoveBorder={() => setPageBorder((prev) => ({ ...prev, enabled: false }))}
+      />
     </div>
   );
 }

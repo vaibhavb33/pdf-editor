@@ -6,8 +6,13 @@ import {
   TextRun,
   ParagraphLayout,
   TextAlignment,
+  FontDetectionMetadata,
 } from "./edit-types";
 import { resolveFontDisplayInfo } from "./font-matcher";
+import {
+  matchFontInCatalog,
+  normalizePdfFontName,
+} from "./font-catalog";
 
 interface RawTextItem {
   str: string;
@@ -113,6 +118,8 @@ interface ProcessedRawItem {
   rawFontName: string;
   isBold: boolean;
   isItalic: boolean;
+  embeddedFontFamily?: string;
+  detection?: FontDetectionMetadata;
 }
 
 interface LineRunItem {
@@ -178,24 +185,98 @@ export async function extractPageText(
       : null;
 
     const style = styles[item.fontName] || {};
-    const fontLookupName = fontObj?.name || item.fontName || "";
-    const parsed = parseFontDetails(fontLookupName, style.fontFamily);
+    const rawFontLookup = fontObj?.name || fontObj?.loadedName || item.fontName || "";
+    const styleFamily = style.fontFamily || "";
 
-    const isBold = Boolean(fontObj?.bold || fontObj?.black || parsed.isBold);
-    const isItalic = Boolean(fontObj?.italic || parsed.isItalic);
-    const fontFamily = fontObj?.name ? cleanFontName(fontObj.name) : parsed.fontFamily;
-    const fontCategory = parsed.fontCategory;
+    // Register embedded font data as FontFace in browser if available
+    let embeddedFontFamily: string | undefined;
+    if (typeof window !== "undefined" && typeof FontFace !== "undefined" && fontObj?.data) {
+      try {
+        const safeName = (item.fontName || "f").replace(/[^a-zA-Z0-9_-]/g, "");
+        const fontKey = `pdf-emb-${pageIndex}-${safeName}`;
+        if (!document.fonts.check(`12px "${fontKey}"`)) {
+          const rawBuffer = fontObj.data.buffer
+            ? fontObj.data.buffer.slice(
+                fontObj.data.byteOffset,
+                fontObj.data.byteOffset + fontObj.data.byteLength
+              )
+            : fontObj.data;
+          const fontFace = new FontFace(fontKey, rawBuffer);
+          fontFace
+            .load()
+            .then((loaded) => {
+              document.fonts.add(loaded);
+            })
+            .catch(() => {
+              // unsupported format or subset
+            });
+          embeddedFontFamily = fontKey;
+        } else {
+          embeddedFontFamily = fontKey;
+        }
+      } catch {
+        // ignore FontFace load errors
+      }
+    }
+
+    // Match font in standardized catalog
+    const match = matchFontInCatalog(rawFontLookup, styleFamily, {
+      isSerif: Boolean(fontObj?.serif),
+      isMonospace: Boolean(fontObj?.monospace),
+      isBold: Boolean(fontObj?.bold || fontObj?.black),
+      isItalic: Boolean(fontObj?.italic),
+    });
+
+    const norm = normalizePdfFontName(rawFontLookup);
+    const isBold = Boolean(fontObj?.bold || fontObj?.black || norm.isBold);
+    const isItalic = Boolean(fontObj?.italic || norm.isItalic);
+
+    let detectedFamily = match.detectedFamily;
+    let mappedFamily = match.mappedFamily;
+    let detectedCategory: FontChoice = match.fontCategory;
+    let isExact = match.isExact;
+    let confidence = match.confidence;
 
     // Indic script check from character codes
-    let detectedCategory = fontCategory;
-    let detectedFamily = fontFamily;
     if (/[\u0900-\u097F]/.test(item.str)) {
       detectedCategory = "devanagari";
       detectedFamily = "Noto Sans Devanagari";
+      mappedFamily = "Noto Sans Devanagari";
+      isExact = true;
+      confidence = 1.0;
     } else if (/[\u0A80-\u0AFF]/.test(item.str)) {
       detectedCategory = "gujarati";
       detectedFamily = "Noto Sans Gujarati";
+      mappedFamily = "Noto Sans Gujarati";
+      isExact = true;
+      confidence = 1.0;
+    } else if (/[\u0B80-\u0BFF]/.test(item.str)) {
+      detectedCategory = "sans-serif";
+      detectedFamily = "Noto Sans Tamil";
+      mappedFamily = "Noto Sans Tamil";
+      isExact = true;
+      confidence = 1.0;
+    } else if (/[\u0980-\u09FF]/.test(item.str)) {
+      detectedCategory = "sans-serif";
+      detectedFamily = "Noto Sans Bengali";
+      mappedFamily = "Noto Sans Bengali";
+      isExact = true;
+      confidence = 1.0;
     }
+
+    const detection: FontDetectionMetadata = {
+      rawName: rawFontLookup,
+      normalizedFamily: detectedFamily,
+      mappedFont: mappedFamily,
+      isExact,
+      confidence,
+      flags: {
+        isSerif: Boolean(fontObj?.serif || norm.isSerif),
+        isMonospace: Boolean(fontObj?.monospace || norm.isMonospace),
+        isBold,
+        isItalic,
+      },
+    };
 
     const itemWidth = Math.max(item.width, fontSize * 0.4 * item.str.length);
     const itemHeight = Math.max(item.height || fontSize, fontSize * 1.15);
@@ -209,9 +290,11 @@ export async function extractPageText(
       fontSize,
       fontFamily: detectedFamily,
       fontCategory: detectedCategory,
-      rawFontName: item.fontName || "",
+      rawFontName: rawFontLookup,
       isBold,
       isItalic,
+      embeddedFontFamily,
+      detection,
     });
   }
 
@@ -246,6 +329,7 @@ export async function extractPageText(
       isItalic: item.isItalic,
       isUnderline: false,
       color: { r: 0.1, g: 0.1, b: 0.1 },
+      embeddedFontFamily: item.embeddedFontFamily,
     };
 
     if (canJoinLine && lastLine) {
@@ -326,11 +410,11 @@ export async function extractPageText(
     }
   }
 
-  // Identify column right edge from substantial lines
+  // Identify column right edge from the widest substantial lines on the page
   const substantialLines = lines.filter((l) => l.text.trim().length > 25 || l.width > 120);
   const colRight =
     substantialLines.length > 0
-      ? median(substantialLines.map((l) => l.endX))
+      ? Math.max(...substantialLines.map((l) => l.endX))
       : Math.max(...lines.map((l) => l.endX), dominantColLeft + 200);
 
   interface RawParagraph {
@@ -352,21 +436,19 @@ export async function extractPageText(
       const avgFontSize = (prevLine.fontSize + curLine.fontSize) / 2;
 
       // Rule 1: Vertical gap is clearly larger than normal line height
-      const isLargeVerticalGap = deltaY > Math.max(pageMedianLineGap * 1.28, avgFontSize * 1.35);
+      const isLargeVerticalGap = deltaY > Math.max(pageMedianLineGap * 1.25, avgFontSize * 1.35);
 
       // Rule 2: Next line has a first-line indent
-      // (curLine starts further right than dominant column margin or previous line by >= 6pt)
+      // (curLine starts further right than dominant column margin AND previous line by >= 6pt)
       const isFirstLineIndent =
-        (curLine.tx - dominantColLeft >= 6.0 || curLine.tx - prevLine.tx >= 6.0) &&
+        curLine.tx - dominantColLeft >= 6.0 &&
+        curLine.tx - prevLine.tx >= 6.0 &&
         curLine.tx < colRight - 40;
 
-      // Rule 3: Previous line ended well short of column right edge (sentence/paragraph ended)
-      // and current line starts back at the column left margin
-      const prevLineEndedShort = prevLine.endX < colRight - 32 && prevLine.width > 30;
-      const curStartsAtLeftMargin =
-        Math.abs(curLine.tx - dominantColLeft) <= 4.0 ||
-        Math.abs(curLine.tx - Math.min(prevLine.tx, dominantColLeft)) <= 4.0;
-      const isBreakByShortLineEnd = prevLineEndedShort && curStartsAtLeftMargin;
+      // Rule 3: Previous line ended well short of column right edge AND vertical gap indicates a break
+      const prevLineEndedShort = prevLine.endX < colRight - 45 && prevLine.width > 30;
+      const verticalGapIndicatesBreak = deltaY > pageMedianLineGap * 1.15;
+      const isBreakByShortLineEnd = prevLineEndedShort && verticalGapIndicatesBreak;
 
       // Rule 4: Font size or heading/bold weight changes for the whole line
       const fontSizeDiffers = Math.abs(curLine.fontSize - prevLine.fontSize) >= 1.5;
@@ -570,6 +652,10 @@ export async function extractPageText(
     };
 
     const fontInfo = resolveFontDisplayInfo(dominantRun.fontFamily, dominantRun.fontFamily, dominantRun.fontCategory);
+    const dominantRaw = rawItems.find((r) => r.str.includes(dominantRun.text.slice(0, 5))) || rawItems[0];
+    const detection = dominantRaw?.detection;
+    const isSubstituted = Boolean(detection ? !detection.isExact : fontInfo.isSubstitute);
+    const substitutedName = detection ? detection.mappedFont : fontInfo.substitutedFontName;
 
     let paragraphSpacing: number | undefined;
     if (idx < paragraphs.length - 1) {
@@ -610,9 +696,11 @@ export async function extractPageText(
       fontSize: dominantRun.fontSize,
       fontFamily: dominantRun.fontFamily,
       fontCategory: dominantRun.fontCategory,
-      fontName: dominantRun.fontFamily,
-      isSubstitutedFont: fontInfo.isSubstitute,
-      substitutedFontName: fontInfo.substitutedFontName,
+      fontName: detection?.rawName || dominantRun.fontFamily,
+      isSubstitutedFont: isSubstituted,
+      substitutedFontName: substitutedName,
+      detection,
+      embeddedFontFamily: dominantRun.embeddedFontFamily,
       isBold: dominantRun.isBold,
       isItalic: dominantRun.isItalic,
       isUnderline: false,

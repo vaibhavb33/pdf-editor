@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { FontChoice, TextBlock, TextRun } from "@/lib/pdf/edit-types";
+import { FontChoice, TextBlock, TextRun, PageBorderConfig, shouldPageHaveBorder } from "@/lib/pdf/edit-types";
 import { sampleBackgroundColor, sampleTextColor, findNearestBlockStyle } from "@/lib/pdf/text-extractor";
 import { ActiveFormattingState } from "./EditToolbar";
 
@@ -34,6 +34,7 @@ interface EditPageCanvasProps {
   initialPageSize?: { width: number; height: number };
   onPageVisible?: (pageIndex: number) => void;
   onCaretChange?: (formatting: ActiveFormattingState) => void;
+  pageBorder?: PageBorderConfig;
 }
 
 /**
@@ -140,13 +141,27 @@ function renderRunsToHtml(
     isBold: boolean;
     isItalic: boolean;
     isUnderline?: boolean;
+    fontFamily?: string;
+    fontSize?: number;
     color: { r: number; g: number; b: number };
+    userOverride?: boolean;
   }
 ): string {
   if (runs && runs.length > 0) {
     return runs
       .map((run) => {
+        const runFont =
+          run.embeddedFontFamily && !baseBlock.userOverride && !run.userOverride
+            ? `"${run.embeddedFontFamily}", "${run.fontFamily}", sans-serif`
+            : run.fontFamily && baseBlock.fontFamily && (run.fontFamily !== baseBlock.fontFamily || run.userOverride)
+            ? `"${run.fontFamily}", sans-serif`
+            : "";
+
         const styles = [
+          runFont ? `font-family: ${runFont};` : "",
+          run.fontSize && baseBlock.fontSize && Math.abs(run.fontSize - baseBlock.fontSize) > 0.5
+            ? `font-size: ${Math.round(run.fontSize * 1.33)}px;`
+            : "",
           run.isBold ? "font-weight: 700;" : "font-weight: 400;",
           run.isItalic ? "font-style: italic;" : "font-style: normal;",
           run.isUnderline ? "text-decoration: underline;" : "",
@@ -274,6 +289,7 @@ export function EditPageCanvas({
   initialPageSize,
   onPageVisible,
   onCaretChange,
+  pageBorder,
 }: EditPageCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -518,6 +534,33 @@ export function EditPageCanvas({
           </div>
         )}
 
+        {/* Live Preview Page Border (Non-selectable, live preview matching export) */}
+        {pageBorder && shouldPageHaveBorder(pageBorder, pageIndex, pdfDoc?.numPages || 1) && (
+          <div
+            style={{
+              position: "absolute",
+              left: `${Math.round(pageBorder.margin * scale)}px`,
+              top: `${Math.round(pageBorder.margin * scale)}px`,
+              right: `${Math.round(pageBorder.margin * scale)}px`,
+              bottom: `${Math.round(pageBorder.margin * scale)}px`,
+              borderWidth: `${Math.max(1, Math.round(pageBorder.width * scale))}px`,
+              borderStyle:
+                pageBorder.style === "double"
+                  ? "double"
+                  : pageBorder.style === "dashed"
+                  ? "dashed"
+                  : pageBorder.style === "dotted"
+                  ? "dotted"
+                  : "solid",
+              borderColor: pageBorder.color,
+              borderRadius: pageBorder.cornerRadius ? `${Math.round(pageBorder.cornerRadius * scale)}px` : "0px",
+              pointerEvents: "none",
+              boxSizing: "border-box",
+              zIndex: 15,
+            }}
+          />
+        )}
+
         {/* Word-Like Interactive Text Overlay Layer */}
         {viewport && isRendered && (
           <div className="absolute inset-0 pointer-events-none">
@@ -629,11 +672,14 @@ function WordLikeTextBlockItem({
   const isModified = Boolean(block.isNew || block.isEdited || block.currentText !== block.originalText);
   const shouldMaskOriginal = isModified;
 
+  const lastRenderedStyleRef = useRef<string>("");
+
   // Populate contentEditable on mount and when block ID changes
   useEffect(() => {
     if (editableRef.current) {
       editableRef.current.innerHTML = renderRunsToHtml(block.runs, block.currentText, block);
       lastRenderedTextRef.current = block.currentText;
+      lastRenderedStyleRef.current = `${block.fontFamily}_${block.fontSize}_${block.isBold}_${block.isItalic}_${block.isUnderline}_${block.textAlign}_${JSON.stringify(block.color)}_${(block.runs || []).map((r) => `${r.fontFamily}_${r.fontSize}_${r.isBold}_${r.isItalic}_${r.isUnderline}_${r.text}`).join("|")}`;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [block.id]);
@@ -643,15 +689,21 @@ function WordLikeTextBlockItem({
     if (!editableRef.current) return;
     const isFocused = document.activeElement === editableRef.current;
 
-    // If focused and text is identical to internal DOM, don't overwrite DOM
-    if (isFocused && editableRef.current.innerText === block.currentText) {
-      return;
-    }
+    const styleKey = `${block.fontFamily}_${block.fontSize}_${block.isBold}_${block.isItalic}_${block.isUnderline}_${block.textAlign}_${JSON.stringify(block.color)}_${(block.runs || []).map((r) => `${r.fontFamily}_${r.fontSize}_${r.isBold}_${r.isItalic}_${r.isUnderline}_${r.text}`).join("|")}`;
 
-    if (lastRenderedTextRef.current !== block.currentText) {
+    const textChanged = lastRenderedTextRef.current !== block.currentText;
+    const styleChanged = lastRenderedStyleRef.current !== styleKey;
+
+    if (textChanged || styleChanged) {
+      // If focused and text is identical to internal DOM and style hasn't changed, don't overwrite DOM
+      if (isFocused && !styleChanged && editableRef.current.innerText === block.currentText) {
+        return;
+      }
+
       const savedOffsets = isFocused ? getCaretCharacterOffset(editableRef.current) : null;
       editableRef.current.innerHTML = renderRunsToHtml(block.runs, block.currentText, block);
       lastRenderedTextRef.current = block.currentText;
+      lastRenderedStyleRef.current = styleKey;
 
       if (isFocused && savedOffsets) {
         restoreCaretCharacterOffset(editableRef.current, savedOffsets.start, savedOffsets.end);
@@ -673,6 +725,7 @@ function WordLikeTextBlockItem({
       color: block.color,
       isSubstituted: block.isSubstitutedFont,
       substitutedFontName: block.substitutedFontName,
+      detection: block.detection,
     });
   }, [block, textAlign, onCaretChange]);
 
@@ -757,13 +810,13 @@ function WordLikeTextBlockItem({
       const key = e.key.toLowerCase();
       if (key === "b") {
         e.preventDefault();
-        onUpdate({ isBold: !block.isBold, isEdited: true });
+        onUpdate({ isBold: !block.isBold, isEdited: true, userOverride: true });
       } else if (key === "i") {
         e.preventDefault();
-        onUpdate({ isItalic: !block.isItalic, isEdited: true });
+        onUpdate({ isItalic: !block.isItalic, isEdited: true, userOverride: true });
       } else if (key === "u") {
         e.preventDefault();
-        onUpdate({ isUnderline: !block.isUnderline, isEdited: true });
+        onUpdate({ isUnderline: !block.isUnderline, isEdited: true, userOverride: true });
       }
     } else if (e.key === "Escape") {
       editableRef.current?.blur();
@@ -869,22 +922,29 @@ function WordLikeTextBlockItem({
   const cssFontSize = Math.max(7, Math.round(block.fontSize * scale));
   const cssLineHeight = Math.max(cssFontSize, Math.round(lineHeightPt * scale));
 
+  const mappedFallback = block.userOverride
+    ? block.fontFamily
+    : block.detection?.mappedFont ||
+      (block.fontCategory === "calibri"
+        ? "Carlito"
+        : block.fontCategory === "cambria"
+        ? "Caladea"
+        : block.fontCategory === "serif"
+        ? "Liberation Serif"
+        : block.fontCategory === "monospace"
+        ? "Liberation Mono"
+        : block.fontCategory === "devanagari"
+        ? "Noto Sans Devanagari"
+        : block.fontCategory === "gujarati"
+        ? "Noto Sans Gujarati"
+        : block.fontCategory === "roboto"
+        ? "Roboto"
+        : block.fontFamily || "Liberation Sans");
+
   const fontFamilyStyle =
-    block.fontCategory === "calibri"
-      ? "Carlito, Calibri, sans-serif"
-      : block.fontCategory === "cambria"
-      ? "Caladea, Cambria, serif"
-      : block.fontCategory === "serif"
-      ? "'Liberation Serif', 'Times New Roman', Times, serif"
-      : block.fontCategory === "monospace"
-      ? "'Liberation Mono', 'Courier New', Courier, monospace"
-      : block.fontCategory === "devanagari"
-      ? "'Noto Sans Devanagari', sans-serif"
-      : block.fontCategory === "gujarati"
-      ? "'Noto Sans Gujarati', sans-serif"
-      : block.fontCategory === "roboto"
-      ? "Roboto, sans-serif"
-      : "'Liberation Sans', Arial, Helvetica, sans-serif";
+    block.embeddedFontFamily && !block.userOverride
+      ? `"${block.embeddedFontFamily}", "${mappedFallback}", "${block.fontFamily}", sans-serif`
+      : `"${block.fontFamily}", "${mappedFallback}", sans-serif`;
 
   const textColorRgb = block.color
     ? `rgb(${Math.round(block.color.r * 255)}, ${Math.round(block.color.g * 255)}, ${Math.round(block.color.b * 255)})`

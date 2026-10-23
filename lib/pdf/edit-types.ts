@@ -6,10 +6,25 @@ export type FontChoice =
   | "cambria"
   | "roboto"
   | "devanagari"
-  | "gujarati";
+  | "gujarati"
+  | string;
 
 export type TextAlignment = "left" | "center" | "right" | "justify";
 export type TextAlign = TextAlignment;
+
+export interface FontDetectionMetadata {
+  rawName: string;
+  normalizedFamily: string;
+  mappedFont: string;
+  isExact: boolean;
+  confidence: number;
+  flags?: {
+    isSerif?: boolean;
+    isMonospace?: boolean;
+    isBold?: boolean;
+    isItalic?: boolean;
+  };
+}
 
 export interface TextRun {
   id: string;
@@ -21,6 +36,8 @@ export interface TextRun {
   isItalic: boolean;
   isUnderline?: boolean;
   color: { r: number; g: number; b: number };
+  userOverride?: boolean;
+  embeddedFontFamily?: string;
 }
 
 export interface ParagraphLayout {
@@ -33,6 +50,8 @@ export interface ParagraphLayout {
   letterSpacing?: number;
   wordSpacing?: number;
   paragraphSpacing?: number; // in pt (vertical gap to next paragraph)
+  spaceBefore?: number; // in pt
+  spaceAfter?: number; // in pt
 }
 
 export interface OriginalLine {
@@ -77,6 +96,9 @@ export interface TextBlock {
   fontName?: string; // original PDF font name e.g. "ABCDEF+Calibri-Bold"
   isSubstitutedFont?: boolean;
   substitutedFontName?: string;
+  detection?: FontDetectionMetadata;
+  userOverride?: boolean;
+  embeddedFontFamily?: string;
 
   isBold: boolean;
   isItalic: boolean;
@@ -119,6 +141,68 @@ export interface NewTextBoxParams {
   isItalic: boolean;
   isUnderline?: boolean;
   textAlign?: TextAlignment;
+}
+
+export type PageBorderStyle = "solid" | "double" | "dashed" | "dotted";
+export type PageBorderScope = "all" | "current" | "custom" | "first-only" | "exclude-first";
+
+export interface PageBorderConfig {
+  enabled: boolean;
+  style: PageBorderStyle;
+  width: number; // 0.5 - 10 pt
+  color: string; // hex color e.g. "#1e40af"
+  margin: number; // 10 - 100 pt
+  cornerRadius?: number; // 0 - 50 pt
+  scope: PageBorderScope;
+  customRange?: string; // e.g. "1, 3-5"
+  targetPageIndex?: number;
+}
+
+/**
+ * Determines whether a specific page should receive a border based on scope settings.
+ */
+export function shouldPageHaveBorder(
+  config: PageBorderConfig | undefined | null,
+  pageIndex: number,
+  totalPages = 1
+): boolean {
+  if (!config || !config.enabled || totalPages <= 0) return false;
+  const pageNum = pageIndex + 1; // 1-based
+
+  switch (config.scope) {
+    case "all":
+      return true;
+    case "current":
+      return config.targetPageIndex !== undefined ? config.targetPageIndex === pageIndex : true;
+    case "first-only":
+      return pageIndex === 0;
+    case "exclude-first":
+      return pageIndex > 0;
+    case "custom": {
+      if (!config.customRange) return false;
+      const parts = config.customRange.split(",").map((s) => s.trim());
+      for (const part of parts) {
+        if (part.includes("-")) {
+          const [startStr, endStr] = part.split("-").map((s) => parseInt(s.trim(), 10));
+          if (!isNaN(startStr) && !isNaN(endStr)) {
+            const min = Math.min(startStr, endStr);
+            const max = Math.max(startStr, endStr);
+            if (pageNum >= min && pageNum <= max) {
+              return true;
+            }
+          }
+        } else {
+          const num = parseInt(part, 10);
+          if (!isNaN(num) && num === pageNum) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+    default:
+      return true;
+  }
 }
 
 

@@ -1,0 +1,136 @@
+/* Editor Bundled Fonts */
+@import "@fontsource/inter/index.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/poppins/index.css";
+@import "@fontsource/poppins/700.css";
+@import "@fontsource/open-sans/index.css";
+@import "@fontsource/open-sans/700.css";
+@import "@fontsource/lato/index.css";
+@import "@fontsource/lato/700.css";
+@import "@fontsource/nunito/index.css";
+@import "@fontsource/merriweather/index.css";
+@import "@fontsource/merriweather/700.css";
+@import "@fontsource/playfair-display/index.css";
+@import "@fontsource/playfair-display/700.css";
+@import "@fontsource/eb-garamond/index.css";
+@import "@fontsource/roboto-mono/index.css";
+@import "@fontsource/dancing-script/index.css";
+@import "@fontsource/dancing-script/700.css";
+@import "@fontsource/caveat/index.css";
+@import "@fontsource/great-vibes/index.css";
+@import "@fontsource/noto-sans-tamil/index.css";
+@import "@fontsource/noto-sans-bengali/index.css";
+
+/* Local Metric-Compatible & Indian Fonts */
+@font-face {
+  font-family: 'Carlito';
+  src: url('/fonts/carlito.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Carlito';
+  src: url('/fonts/carlito-bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Caladea';
+  src: url('/fonts/caladea.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Caladea';
+  src: url('/fonts/caladea-bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Sans';
+  src: url('/fonts/sans.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Sans';
+  src: url('/fonts/sans-bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Sans';
+  src: url('/fonts/sans-italic.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Serif';
+  src: url('/fonts/serif.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Serif';
+  src: url('/fonts/serif-bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Mono';
+  src: url('/fonts/mono.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Noto Sans Devanagari';
+  src: url('/fonts/noto-devanagari.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Noto Sans Devanagari';
+  src: url('/fonts/noto-devanagari-bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Noto Sans Gujarati';
+  src: url('/fonts/noto-gujarati.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Noto Sans Gujarati';
+  src: url('/fonts/noto-gujarati-bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Roboto';
+  src: url('/fonts/roboto.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Roboto';
+  src: url('/fonts/roboto-bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}

@@ -181,78 +181,138 @@ export async function getBestMatchingFont(
   const { fontFamily, fontCategory, isBold = false, isItalic = false, textToEncode = "" } = options;
   const fam = (fontFamily || "").toLowerCase();
 
-  // 1. Check for Indic scripts in the text or font description
+  // 1. Script-specific fonts
   const hasDevanagari = /[\u0900-\u097F]/.test(textToEncode) || fam.includes("deva") || fam.includes("hindi") || fontCategory === "devanagari";
   if (hasDevanagari) {
-    const ttf = isBold ? "noto-devanagari-bold.ttf" : "noto-devanagari.ttf";
-    const font = await getOrEmbedTtf(pdfDoc, ttf);
-    if (font && canFontEncodeText(font, textToEncode)) {
-      return font;
-    }
+    const file = isBold ? "noto-devanagari-bold.ttf" : "noto-devanagari.ttf";
+    const font = await getOrEmbedTtf(pdfDoc, file);
+    if (font && canFontEncodeText(font, textToEncode)) return font;
   }
 
   const hasGujarati = /[\u0A80-\u0AFF]/.test(textToEncode) || fam.includes("guj") || fontCategory === "gujarati";
   if (hasGujarati) {
-    const ttf = isBold ? "noto-gujarati-bold.ttf" : "noto-gujarati.ttf";
-    const font = await getOrEmbedTtf(pdfDoc, ttf);
-    if (font && canFontEncodeText(font, textToEncode)) {
-      return font;
-    }
+    const file = isBold ? "noto-gujarati-bold.ttf" : "noto-gujarati.ttf";
+    const font = await getOrEmbedTtf(pdfDoc, file);
+    if (font && canFontEncodeText(font, textToEncode)) return font;
   }
 
-  // 2. Metric-compatible fonts
+  const hasTamil = /[\u0B80-\u0BFF]/.test(textToEncode) || fam.includes("tamil");
+  if (hasTamil) {
+    const font = await getOrEmbedTtf(pdfDoc, "noto-tamil.woff");
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  const hasBengali = /[\u0980-\u09FF]/.test(textToEncode) || fam.includes("bengali");
+  if (hasBengali) {
+    const font = await getOrEmbedTtf(pdfDoc, "noto-bengali.woff");
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  // 2. Specific bundled families
+  if (fam.includes("inter")) {
+    const file = isBold ? "inter-bold.woff" : "inter.woff";
+    const font = await getOrEmbedTtf(pdfDoc, file);
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  if (fam.includes("poppins")) {
+    const file = isBold ? "poppins-bold.woff" : "poppins.woff";
+    const font = await getOrEmbedTtf(pdfDoc, file);
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  if (fam.includes("open sans")) {
+    const file = isBold ? "open-sans-bold.woff" : "open-sans.woff";
+    const font = await getOrEmbedTtf(pdfDoc, file);
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  if (fam.includes("lato")) {
+    const file = isBold ? "lato-bold.woff" : "lato.woff";
+    const font = await getOrEmbedTtf(pdfDoc, file);
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  if (fam.includes("playfair")) {
+    const file = isBold ? "playfair-display-bold.woff" : "playfair-display.woff";
+    const font = await getOrEmbedTtf(pdfDoc, file);
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  if (fam.includes("merriweather")) {
+    const file = isBold ? "merriweather-bold.woff" : "merriweather.woff";
+    const font = await getOrEmbedTtf(pdfDoc, file);
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  if (fam.includes("garamond")) {
+    const font = await getOrEmbedTtf(pdfDoc, "eb-garamond.woff");
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  if (fam.includes("dancing script")) {
+    const file = isBold ? "dancing-script-bold.woff" : "dancing-script.woff";
+    const font = await getOrEmbedTtf(pdfDoc, file);
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  if (fam.includes("caveat")) {
+    const font = await getOrEmbedTtf(pdfDoc, "caveat.woff");
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  if (fam.includes("great vibes")) {
+    const font = await getOrEmbedTtf(pdfDoc, "great-vibes.woff");
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  if (fam.includes("roboto mono")) {
+    const font = await getOrEmbedTtf(pdfDoc, "roboto-mono.woff");
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  if (fam.includes("roboto") || fontCategory === "roboto") {
+    const file = isBold ? "roboto-bold.ttf" : "roboto.ttf";
+    const font = await getOrEmbedTtf(pdfDoc, file);
+    if (font && canFontEncodeText(font, textToEncode)) return font;
+  }
+
+  // 3. Metric-compatible fonts
   // Calibri -> Carlito
   if (fam.includes("calibri") || fam.includes("carlito") || fontCategory === "calibri") {
     const ttf = isBold ? "carlito-bold.ttf" : "carlito.ttf";
     const font = await getOrEmbedTtf(pdfDoc, ttf);
-    if (font && canFontEncodeText(font, textToEncode)) {
-      return font;
-    }
+    if (font && canFontEncodeText(font, textToEncode)) return font;
   }
 
   // Cambria -> Caladea
   if (fam.includes("cambria") || fam.includes("caladea") || fontCategory === "cambria") {
     const ttf = isBold ? "caladea-bold.ttf" : "caladea.ttf";
     const font = await getOrEmbedTtf(pdfDoc, ttf);
-    if (font && canFontEncodeText(font, textToEncode)) {
-      return font;
-    }
+    if (font && canFontEncodeText(font, textToEncode)) return font;
   }
 
-  // Roboto
-  if (fam.includes("roboto") || fontCategory === "roboto") {
-    const ttf = isBold ? "roboto-bold.ttf" : "roboto.ttf";
-    const font = await getOrEmbedTtf(pdfDoc, ttf);
-    if (font && canFontEncodeText(font, textToEncode)) {
-      return font;
-    }
-  }
-
-  // Serif (Times New Roman / Liberation Serif)
+  // Serif (Times New Roman / Liberation Serif / Georgia / Gelasio)
   if (fam.includes("serif") || fam.includes("times") || fam.includes("roman") || fam.includes("georgia") || fontCategory === "serif") {
     const ttf = isBold ? "serif-bold.ttf" : "serif.ttf";
     const font = await getOrEmbedTtf(pdfDoc, ttf);
-    if (font && canFontEncodeText(font, textToEncode)) {
-      return font;
-    }
+    if (font && canFontEncodeText(font, textToEncode)) return font;
   }
 
-  // Monospace (Courier New / Liberation Mono)
+  // Monospace (Courier New / Liberation Mono / Consolas)
   if (fam.includes("mono") || fam.includes("courier") || fam.includes("consolas") || fontCategory === "monospace") {
     const font = await getOrEmbedTtf(pdfDoc, "mono.ttf");
-    if (font && canFontEncodeText(font, textToEncode)) {
-      return font;
-    }
+    if (font && canFontEncodeText(font, textToEncode)) return font;
   }
 
-  // Default Sans-Serif (Arial / Liberation Sans)
+  // Default Sans-Serif (Arial / Liberation Sans / Verdana)
   const sansTtf = isBold ? "sans-bold.ttf" : isItalic ? "sans-italic.ttf" : "sans.ttf";
   const sansFont = await getOrEmbedTtf(pdfDoc, sansTtf);
-  if (sansFont && canFontEncodeText(fontFamily ? sansFont : sansFont, textToEncode)) {
+  if (sansFont && canFontEncodeText(sansFont, textToEncode)) {
     return sansFont;
   }
 
-  // 3. Fallback to standard PDF fonts
+  // 4. Fallback to standard PDF fonts
   let stdName: StandardFonts;
   if (fam.includes("serif") || fam.includes("times") || fontCategory === "serif") {
     if (isBold && isItalic) stdName = StandardFonts.TimesRomanBoldItalic;
@@ -294,6 +354,8 @@ export async function splitTextIntoFontRuns(
   // Prepare fallback font candidates
   const devanagariFont = await getOrEmbedTtf(pdfDoc, isBold ? "noto-devanagari-bold.ttf" : "noto-devanagari.ttf");
   const gujaratiFont = await getOrEmbedTtf(pdfDoc, isBold ? "noto-gujarati-bold.ttf" : "noto-gujarati.ttf");
+  const tamilFont = await getOrEmbedTtf(pdfDoc, "noto-tamil.woff");
+  const bengaliFont = await getOrEmbedTtf(pdfDoc, "noto-bengali.woff");
   const sansFont = await getOrEmbedTtf(pdfDoc, isBold ? "sans-bold.ttf" : "sans.ttf");
   const robotoFont = await getOrEmbedTtf(pdfDoc, isBold ? "roboto-bold.ttf" : "roboto.ttf");
 
@@ -310,12 +372,15 @@ export async function splitTextIntoFontRuns(
       chosenFont = devanagariFont;
     } else if (/[\u0A80-\u0AFF]/.test(char) && gujaratiFont && canFontEncodeChar(gujaratiFont, char)) {
       chosenFont = gujaratiFont;
+    } else if (/[\u0B80-\u0BFF]/.test(char) && tamilFont && canFontEncodeChar(tamilFont, char)) {
+      chosenFont = tamilFont;
+    } else if (/[\u0980-\u09FF]/.test(char) && bengaliFont && canFontEncodeChar(bengaliFont, char)) {
+      chosenFont = bengaliFont;
     } else if (sansFont && canFontEncodeChar(sansFont, char)) {
       chosenFont = sansFont;
     } else if (robotoFont && canFontEncodeChar(robotoFont, char)) {
       chosenFont = robotoFont;
     } else {
-      // If none can encode, stick with current or primary
       chosenFont = primaryFont;
     }
 

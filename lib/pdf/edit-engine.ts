@@ -1,6 +1,6 @@
 import { rgb, PDFFont, RGB } from "pdf-lib";
 import { safeLoadPdf, yieldToEventLoop } from "./safe-load";
-import { TextBlock, TextRun } from "./edit-types";
+import { TextBlock, TextRun, PageBorderConfig, shouldPageHaveBorder } from "./edit-types";
 import { getBestMatchingFont, splitTextIntoFontRuns } from "./font-matcher";
 import { ToolExecutionResult } from "./types";
 
@@ -9,6 +9,7 @@ export interface ApplyEditsOptions {
   blocks: TextBlock[];
   outputFilename?: string;
   onProgress?: (progress: number, stage: string) => void;
+  pageBorder?: PageBorderConfig;
 }
 
 interface ExportWord {
@@ -28,6 +29,20 @@ interface WrappedLine {
   isLastLineOfParagraph: boolean;
   availableWidth: number;
   totalWordsWidth: number;
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  let clean = hex.replace("#", "");
+  if (clean.length === 3) {
+    clean = clean.split("").map((c) => c + c).join("");
+  }
+  const num = parseInt(clean, 16);
+  if (isNaN(num)) return { r: 0.15, g: 0.39, b: 0.92 };
+  return {
+    r: ((num >> 16) & 255) / 255,
+    g: ((num >> 8) & 255) / 255,
+    b: (num & 255) / 255,
+  };
 }
 
 /**
@@ -414,6 +429,82 @@ export async function applyPdfEdits(options: ApplyEditsOptions): Promise<ToolExe
     }
 
     await yieldToEventLoop();
+  }
+
+  // Draw Page Borders if enabled
+  if (options.pageBorder?.enabled) {
+    onProgress?.(85, "Applying page borders...");
+    const borderCfg = options.pageBorder;
+    const borderCol = hexToRgb(borderCfg.color);
+    const borderRgb = rgb(borderCol.r, borderCol.g, borderCol.b);
+    const bWidth = Math.max(0.5, borderCfg.width || 1.5);
+    const margin = Math.max(0, borderCfg.margin ?? 36);
+
+    for (let pIdx = 0; pIdx < pages.length; pIdx++) {
+      if (shouldPageHaveBorder(borderCfg, pIdx, pages.length)) {
+        const p = pages[pIdx];
+        const { width: pWidth, height: pHeight } = p.getSize();
+        const boxX = margin;
+        const boxY = margin;
+        const boxW = Math.max(10, pWidth - margin * 2);
+        const boxH = Math.max(10, pHeight - margin * 2);
+
+        if (borderCfg.style === "double") {
+          const subWidth = Math.max(0.5, bWidth / 2.5);
+          // Outer rectangle
+          p.drawRectangle({
+            x: boxX,
+            y: boxY,
+            width: boxW,
+            height: boxH,
+            borderWidth: subWidth,
+            borderColor: borderRgb,
+          });
+          // Inner rectangle
+          const innerGap = Math.max(2, subWidth * 2);
+          if (boxW > innerGap * 2 && boxH > innerGap * 2) {
+            p.drawRectangle({
+              x: boxX + innerGap,
+              y: boxY + innerGap,
+              width: boxW - innerGap * 2,
+              height: boxH - innerGap * 2,
+              borderWidth: subWidth,
+              borderColor: borderRgb,
+            });
+          }
+        } else if (borderCfg.style === "dashed") {
+          p.drawRectangle({
+            x: boxX,
+            y: boxY,
+            width: boxW,
+            height: boxH,
+            borderWidth: bWidth,
+            borderColor: borderRgb,
+            borderDashArray: [6, 3],
+          });
+        } else if (borderCfg.style === "dotted") {
+          p.drawRectangle({
+            x: boxX,
+            y: boxY,
+            width: boxW,
+            height: boxH,
+            borderWidth: bWidth,
+            borderColor: borderRgb,
+            borderDashArray: [2, 2],
+          });
+        } else {
+          // Solid
+          p.drawRectangle({
+            x: boxX,
+            y: boxY,
+            width: boxW,
+            height: boxH,
+            borderWidth: bWidth,
+            borderColor: borderRgb,
+          });
+        }
+      }
+    }
   }
 
   onProgress?.(90, "Writing optimized PDF file...");
