@@ -278,6 +278,18 @@ export function EditWorkspace() {
     const fontCategory = inheritedStyle?.fontCategory || "sans-serif";
     const color = inheritedStyle?.color || { r: 0.07, g: 0.1, b: 0.15 };
     const defaultText = "Type text here";
+    const runId = `run_${newId}_0`;
+    const initialRun = {
+      id: runId,
+      text: defaultText,
+      fontFamily,
+      fontCategory,
+      fontSize,
+      isBold: false,
+      isItalic: false,
+      isUnderline: false,
+      color,
+    };
 
     const newBlock: TextBlock = {
       id: newId,
@@ -291,6 +303,15 @@ export function EditWorkspace() {
         y: pdfY - fontSize * 0.25,
         width: Math.max(120, fontSize * 0.6 * defaultText.length),
         height: fontSize * 1.3,
+      },
+      runs: [initialRun],
+      layout: {
+        columnX: pdfX,
+        columnWidth: Math.max(120, fontSize * 0.6 * defaultText.length),
+        firstLineIndent: 0,
+        lineHeight: fontSize * 1.25,
+        textAlign: "left",
+        isLineMode: false,
       },
       viewportBounds: {
         left: viewportX,
@@ -317,6 +338,84 @@ export function EditWorkspace() {
     pushHistory(nextBlocks);
     setSelectedBlockId(newId);
     setIsAddTextActive(false);
+  };
+
+  const handleSplitBlock = (blockId: string, caretOffset: number) => {
+    const blockIndex = blocks.findIndex((b) => b.id === blockId);
+    if (blockIndex === -1) return;
+    const block = blocks[blockIndex];
+    const fullText = block.currentText;
+
+    const textBefore = fullText.slice(0, caretOffset).trimEnd();
+    const textAfter = fullText.slice(caretOffset).trimStart() || " ";
+
+    const newBlockId = `split_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const lineGap = block.layout?.lineHeight || block.fontSize * 1.25;
+
+    const updatedBlock: TextBlock = {
+      ...block,
+      currentText: textBefore,
+      isEdited: true,
+    };
+
+    const newBlock: TextBlock = {
+      ...block,
+      id: newBlockId,
+      originalText: "",
+      currentText: textAfter,
+      y: block.y - lineGap,
+      pdfBounds: {
+        ...block.pdfBounds,
+        y: block.pdfBounds.y - lineGap,
+      },
+      viewportBounds: {
+        ...block.viewportBounds,
+        top: block.viewportBounds.top + lineGap * scale,
+      },
+      layout: {
+        ...(block.layout || {
+          columnX: block.x,
+          columnWidth: block.pdfBounds.width,
+          firstLineIndent: 0,
+          lineHeight: lineGap,
+          textAlign: block.textAlign || "left",
+          isLineMode: false,
+        }),
+      },
+      isNew: true,
+      isEdited: true,
+    };
+
+    const nextBlocks = [...blocks];
+    nextBlocks[blockIndex] = updatedBlock;
+    nextBlocks.splice(blockIndex + 1, 0, newBlock);
+    pushHistory(nextBlocks);
+    setSelectedBlockId(newBlockId);
+  };
+
+  const handleMergeWithPrevBlock = (blockId: string) => {
+    const blockIndex = blocks.findIndex((b) => b.id === blockId);
+    if (blockIndex <= 0) return;
+    const block = blocks[blockIndex];
+    const prevBlock = blocks[blockIndex - 1];
+    if (prevBlock.pageIndex !== block.pageIndex || prevBlock.isDeleted) return;
+
+    const mergedText = prevBlock.currentText + " " + block.currentText;
+    const updatedPrevBlock: TextBlock = {
+      ...prevBlock,
+      currentText: mergedText,
+      isEdited: true,
+    };
+    const updatedCurrentBlock: TextBlock = {
+      ...block,
+      isDeleted: true,
+    };
+
+    const nextBlocks = [...blocks];
+    nextBlocks[blockIndex - 1] = updatedPrevBlock;
+    nextBlocks[blockIndex] = updatedCurrentBlock;
+    pushHistory(nextBlocks);
+    setSelectedBlockId(prevBlock.id);
   };
 
   // Zoom controls
@@ -537,6 +636,8 @@ export function EditWorkspace() {
                 }}
                 onUpdateBlock={handleUpdateBlock}
                 onDeleteBlock={handleDeleteBlock}
+                onSplitBlock={handleSplitBlock}
+                onMergeWithPrevBlock={handleMergeWithPrevBlock}
                 isAddTextActive={isAddTextActive}
                 onAddTextAtPoint={handleAddTextAtPoint}
                 onPageVisible={(idx) => setCurrentPage(idx)}

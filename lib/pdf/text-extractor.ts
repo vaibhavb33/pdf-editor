@@ -1,4 +1,12 @@
-import { TextBlock, PageTextData, FontChoice, OriginalLine } from "./edit-types";
+import {
+  TextBlock,
+  PageTextData,
+  FontChoice,
+  OriginalLine,
+  TextRun,
+  ParagraphLayout,
+  TextAlignment,
+} from "./edit-types";
 import { resolveFontDisplayInfo } from "./font-matcher";
 
 interface RawTextItem {
@@ -93,8 +101,43 @@ export function parseFontDetails(
   return { fontFamily, fontCategory, isBold, isItalic };
 }
 
+interface ProcessedRawItem {
+  str: string;
+  tx: number;
+  ty: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  fontFamily: string;
+  fontCategory: FontChoice;
+  rawFontName: string;
+  isBold: boolean;
+  isItalic: boolean;
+}
+
+interface LineRunItem {
+  runs: TextRun[];
+  tx: number;
+  ty: number;
+  endX: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  text: string;
+}
+
 /**
- * Extracts and groups text items into paragraphs and single-line elements.
+ * Calculates median of an array of numbers.
+ */
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Extracts and groups text items into paragraphs with runs, indents, justification, and line-height.
  */
 export async function extractPageText(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -106,19 +149,13 @@ export async function extractPageText(
   const textContent = await pdfPage.getTextContent({ includeMarkedContent: true });
   const styles = textContent.styles || {};
 
-  const rawItems: Array<{
-    str: string;
-    tx: number;
-    ty: number;
-    width: number;
-    height: number;
-    fontSize: number;
-    fontFamily: string;
-    fontCategory: FontChoice;
-    rawFontName: string;
-    isBold: boolean;
-    isItalic: boolean;
-  }> = [];
+  try {
+    await pdfPage.getOperatorList();
+  } catch {
+    // ignore
+  }
+
+  const rawItems: ProcessedRawItem[] = [];
 
   for (const raw of textContent.items) {
     if (!raw || typeof raw.str !== "string" || raw.str === "") {
@@ -135,11 +172,19 @@ export async function extractPageText(
       Math.round(Math.hypot(transform[0], transform[1]) * 10) / 10
     );
 
+    // Retrieve resolved font object from commonObjs if available
+    const fontObj = pdfPage.commonObjs?.has?.(item.fontName)
+      ? pdfPage.commonObjs.get(item.fontName)
+      : null;
+
     const style = styles[item.fontName] || {};
-    const { fontFamily, fontCategory, isBold, isItalic } = parseFontDetails(
-      item.fontName || "",
-      style.fontFamily
-    );
+    const fontLookupName = fontObj?.name || item.fontName || "";
+    const parsed = parseFontDetails(fontLookupName, style.fontFamily);
+
+    const isBold = Boolean(fontObj?.bold || fontObj?.black || parsed.isBold);
+    const isItalic = Boolean(fontObj?.italic || parsed.isItalic);
+    const fontFamily = fontObj?.name ? cleanFontName(fontObj.name) : parsed.fontFamily;
+    const fontCategory = parsed.fontCategory;
 
     // Indic script check from character codes
     let detectedCategory = fontCategory;
@@ -179,163 +224,270 @@ export async function extractPageText(
     return a.tx - b.tx;
   });
 
-  // Step 1: Merge raw items on the same baseline into continuous lines
-  interface SingleLineGroup {
-    str: string;
-    tx: number;
-    ty: number;
-    endX: number;
-    fontSize: number;
-    fontFamily: string;
-    fontCategory: FontChoice;
-    rawFontName: string;
-    isBold: boolean;
-    isItalic: boolean;
-  }
-
-  const mergedLines: SingleLineGroup[] = [];
+  // Step 1: Merge raw items on the same baseline into lines, preserving individual formatted runs
+  const lines: LineRunItem[] = [];
 
   for (const item of rawItems) {
-    const last = mergedLines[mergedLines.length - 1];
+    const lastLine = lines[lines.length - 1];
 
-    if (
-      last &&
-      Math.abs(item.ty - last.ty) < Math.max(2, item.fontSize * 0.25) &&
-      Math.abs(item.fontSize - last.fontSize) < 2.5 &&
-      item.fontCategory === last.fontCategory &&
-      item.isBold === last.isBold &&
-      item.isItalic === last.isItalic &&
-      item.tx >= last.tx - 2 &&
-      item.tx <= last.endX + Math.max(item.fontSize * 1.6, 14)
-    ) {
-      // Check if space needed between items
+    const canJoinLine =
+      lastLine &&
+      Math.abs(item.ty - lastLine.ty) < Math.max(2, item.fontSize * 0.25) &&
+      item.tx >= lastLine.tx - 2 &&
+      item.tx <= lastLine.endX + Math.max(item.fontSize * 1.8, 16);
+
+    const newRun: TextRun = {
+      id: `run_${pageIndex}_${Math.random().toString(36).slice(2, 8)}`,
+      text: item.str,
+      fontFamily: item.fontFamily,
+      fontCategory: item.fontCategory,
+      fontSize: item.fontSize,
+      isBold: item.isBold,
+      isItalic: item.isItalic,
+      isUnderline: false,
+      color: { r: 0.1, g: 0.1, b: 0.1 },
+    };
+
+    if (canJoinLine && lastLine) {
       const needsSpace =
-        item.tx > last.endX + item.fontSize * 0.15 &&
-        !last.str.endsWith(" ") &&
+        item.tx > lastLine.endX + item.fontSize * 0.12 &&
+        !lastLine.text.endsWith(" ") &&
         !item.str.startsWith(" ");
 
-      last.str += (needsSpace ? " " : "") + item.str;
-      last.endX = Math.max(last.endX, item.tx + item.width);
+      const lastRun = lastLine.runs[lastLine.runs.length - 1];
+      const sameStyle =
+        lastRun &&
+        lastRun.fontCategory === item.fontCategory &&
+        lastRun.isBold === item.isBold &&
+        lastRun.isItalic === item.isItalic &&
+        Math.abs(lastRun.fontSize - item.fontSize) < 0.5;
+
+      if (sameStyle && lastRun) {
+        lastRun.text += (needsSpace ? " " : "") + item.str;
+      } else {
+        if (needsSpace && lastRun) {
+          lastRun.text += " ";
+        }
+        lastLine.runs.push(newRun);
+      }
+
+      lastLine.text += (needsSpace ? " " : "") + item.str;
+      lastLine.endX = Math.max(lastLine.endX, item.tx + item.width);
+      lastLine.width = lastLine.endX - lastLine.tx;
     } else {
-      mergedLines.push({
-        str: item.str,
+      lines.push({
+        runs: [newRun],
         tx: item.tx,
         ty: item.ty,
         endX: item.tx + item.width,
+        width: item.width,
+        height: item.height,
         fontSize: item.fontSize,
-        fontFamily: item.fontFamily,
-        fontCategory: item.fontCategory,
-        rawFontName: item.rawFontName,
-        isBold: item.isBold,
-        isItalic: item.isItalic,
+        text: item.str,
       });
     }
   }
 
-  // Step 2: Group consecutive lines into multi-line paragraphs (Word-like text wrapping)
-  interface ParagraphGroup {
-    lines: SingleLineGroup[];
-    fontFamily: string;
-    fontCategory: FontChoice;
-    rawFontName: string;
-    fontSize: number;
-    isBold: boolean;
-    isItalic: boolean;
-    isSingleLine: boolean;
+  // Step 2: Detect paragraphs vs fallback line mode (tables, headings, scattered labels)
+  interface RawParagraph {
+    lines: LineRunItem[];
+    isLineMode: boolean;
   }
 
-  const paragraphGroups: ParagraphGroup[] = [];
+  const paragraphs: RawParagraph[] = [];
 
-  for (const line of mergedLines) {
-    const lastPara = paragraphGroups[paragraphGroups.length - 1];
+  for (let i = 0; i < lines.length; i++) {
+    const curLine = lines[i];
+    const lastPara = paragraphs[paragraphs.length - 1];
     const prevLine = lastPara ? lastPara.lines[lastPara.lines.length - 1] : null;
 
-    let canGroup = false;
+    let canGroupWithPrev = false;
 
-    if (prevLine) {
-      const deltaY = prevLine.ty - line.ty;
-      const avgFontSize = (prevLine.fontSize + line.fontSize) / 2;
+    if (prevLine && !lastPara.isLineMode) {
+      const deltaY = prevLine.ty - curLine.ty;
+      const avgFontSize = (prevLine.fontSize + curLine.fontSize) / 2;
 
-      // Vertical line-spacing condition: deltaY between 0.85x and 1.8x font size
-      const isNormalLineSpacing = deltaY >= avgFontSize * 0.85 && deltaY <= avgFontSize * 2.1;
+      // Vertical line spacing: normal paragraph line delta Y is between 0.85x and 1.85x font size
+      const isNormalLineSpacing = deltaY >= avgFontSize * 0.85 && deltaY <= avgFontSize * 1.85;
 
-      // Same font style and similar size
-      const isSameStyle =
-        prevLine.fontCategory === line.fontCategory &&
-        prevLine.isBold === line.isBold &&
-        prevLine.isItalic === line.isItalic &&
-        Math.abs(prevLine.fontSize - line.fontSize) < 1.5;
+      // Font size consistency
+      const isSimilarFontSize = Math.abs(prevLine.fontSize - curLine.fontSize) <= 1.5;
 
-      // Horizontal alignment: lines start within reasonable margin or indented
-      const isAlignedLeft = Math.abs(prevLine.tx - line.tx) < Math.max(30, avgFontSize * 3);
+      // Horizontal alignment: lines share a common column margin or first-line indent
+      const isColAligned = Math.abs(prevLine.tx - curLine.tx) <= Math.max(36, avgFontSize * 3.5);
 
-      // Avoid merging if previous line is a short title (< 25 chars) and ends well before line 2
-      const isHeading =
-        prevLine.str.length < 25 &&
-        prevLine.endX < line.endX - 80 &&
-        deltaY > avgFontSize * 1.4;
+      // Avoid merging if previous line is a short heading / title
+      const isPrevShortTitle =
+        prevLine.text.length < 25 &&
+        prevLine.endX < curLine.endX - 60 &&
+        deltaY > avgFontSize * 1.35;
 
-      canGroup = isNormalLineSpacing && isSameStyle && isAlignedLeft && !isHeading;
+      // Avoid merging if current line is isolated or significantly different
+      const isTableGridCell = curLine.width < 80 && prevLine.width < 80 && Math.abs(curLine.tx - prevLine.tx) > 20;
+
+      canGroupWithPrev =
+        isNormalLineSpacing &&
+        isSimilarFontSize &&
+        isColAligned &&
+        !isPrevShortTitle &&
+        !isTableGridCell;
     }
 
-    if (canGroup && lastPara) {
-      lastPara.lines.push(line);
-      lastPara.isSingleLine = false;
+    if (canGroupWithPrev && lastPara) {
+      lastPara.lines.push(curLine);
     } else {
-      paragraphGroups.push({
-        lines: [line],
-        fontFamily: line.fontFamily,
-        fontCategory: line.fontCategory,
-        rawFontName: line.rawFontName,
-        fontSize: line.fontSize,
-        isBold: line.isBold,
-        isItalic: line.isItalic,
-        isSingleLine: true,
+      // Determine if this line should be treated as line mode or potential paragraph
+      // If line is very short or looks like table header/cell, set isLineMode
+      paragraphs.push({
+        lines: [curLine],
+        isLineMode: false,
       });
     }
   }
 
-  // Step 3: Create TextBlock instances with viewport coordinates
-  const blocks: TextBlock[] = paragraphGroups.map((p, idx) => {
-    // Union bounds across all constituent lines
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
+  // Step 3: Compute Layout (columnWidth, firstLineIndent, textAlign, lineHeight) for each paragraph
+  const blocks: TextBlock[] = paragraphs.map((para, idx) => {
+    const pLines = para.lines;
+    const isSingleLine = pLines.length === 1;
 
+    // Detect column left edge:
+    // If multi-line, column left edge is the minimum of lines 2..N (or median left edge of non-first lines)
+    let columnX = pLines[0].tx;
+    let firstLineIndent = 0;
+
+    if (!isSingleLine && pLines.length > 1) {
+      const nonFirstLefts = pLines.slice(1).map((l) => l.tx);
+      const medianLeft = median(nonFirstLefts);
+      columnX = medianLeft;
+
+      const rawIndent = pLines[0].tx - columnX;
+      // If indent is more than 3pt, consider it a real first-line indent
+      if (Math.abs(rawIndent) >= 3.0) {
+        firstLineIndent = Math.round(rawIndent * 10) / 10;
+      }
+    }
+
+    // Detect column right edge and width:
+    // If multi-line, exclude the last line since paragraphs often end early
+    let columnWidth: number;
+    let medianRight: number;
+
+    if (isSingleLine) {
+      columnWidth = pLines[0].width;
+      medianRight = pLines[0].endX;
+    } else {
+      const nonLastRights = pLines.slice(0, pLines.length - 1).map((l) => l.endX);
+      medianRight = median(nonLastRights);
+      columnWidth = Math.max(40, medianRight - columnX);
+    }
+
+    // Detect Text Alignment (justify, center, right, left)
+    let textAlign: TextAlignment = "left";
+
+    if (!isSingleLine && pLines.length >= 2) {
+      const nonLastRights = pLines.slice(0, pLines.length - 1).map((l) => l.endX);
+      const rightDifferences = nonLastRights.map((r) => Math.abs(r - medianRight));
+      const maxRightDiff = Math.max(...rightDifferences);
+
+      // If all non-last lines have right edges matching within 3.5pt, the paragraph is JUSTIFIED!
+      if (maxRightDiff <= 3.5) {
+        textAlign = "justify";
+      } else {
+        // Check center alignment
+        const centers = pLines.map((l) => (l.tx + l.endX) / 2);
+        const medianCenter = median(centers);
+        const centerDifferences = centers.map((c) => Math.abs(c - medianCenter));
+        if (Math.max(...centerDifferences) <= 3.0) {
+          textAlign = "center";
+        } else {
+          // Check right alignment (all lines right flush)
+          const allRights = pLines.map((l) => l.endX);
+          const allRightDiffs = allRights.map((r) => Math.abs(r - medianRight));
+          if (Math.max(...allRightDiffs) <= 3.0) {
+            textAlign = "right";
+          }
+        }
+      }
+    }
+
+    // Detect median line-height (baseline delta Y)
+    let baselineLineHeight = pLines[0].fontSize * 1.25;
+    if (pLines.length >= 2) {
+      const deltas: number[] = [];
+      for (let i = 0; i < pLines.length - 1; i++) {
+        deltas.push(pLines[i].ty - pLines[i + 1].ty);
+      }
+      baselineLineHeight = median(deltas);
+    }
+
+    // Soft paragraph text: Join lines with single space ' ' (NEVER hard \n)
+    // Merge runs across all lines in the paragraph
+    const combinedRuns: TextRun[] = [];
     const originalLines: OriginalLine[] = [];
-    const textPieces: string[] = [];
+    const textParts: string[] = [];
 
-    for (const l of p.lines) {
-      const lWidth = Math.max(l.endX - l.tx, l.fontSize * 0.45 * l.str.length);
-      const lHeight = l.fontSize * 1.25;
-      const lY = l.ty - l.fontSize * 0.25;
-
-      minX = Math.min(minX, l.tx);
-      maxX = Math.max(maxX, l.tx + lWidth);
-      minY = Math.min(minY, lY);
-      maxY = Math.max(maxY, lY + lHeight);
+    for (let lIdx = 0; lIdx < pLines.length; lIdx++) {
+      const line = pLines[lIdx];
+      const lWidth = Math.max(line.width, line.fontSize * 0.45 * line.text.length);
+      const lHeight = line.fontSize * 1.25;
+      const lY = line.ty - line.fontSize * 0.25;
 
       originalLines.push({
-        text: l.str,
-        x: l.tx,
+        text: line.text,
+        x: line.tx,
         y: lY,
         width: lWidth,
         height: lHeight,
+        runs: line.runs,
       });
 
-      textPieces.push(l.str);
+      textParts.push(line.text);
+
+      for (let rIdx = 0; rIdx < line.runs.length; rIdx++) {
+        const run = line.runs[rIdx];
+        const isLastRunOfLine = rIdx === line.runs.length - 1;
+        const isNotLastLineOfPara = lIdx < pLines.length - 1;
+        const endsWithHyphen = run.text.endsWith("-") || run.text.endsWith("\u2010");
+        const needsSpace = isLastRunOfLine && isNotLastLineOfPara && !isSingleLine && !endsWithHyphen && !run.text.endsWith(" ");
+        const runText = run.text + (needsSpace ? " " : "");
+
+        const prevCombined = combinedRuns[combinedRuns.length - 1];
+        if (
+          prevCombined &&
+          prevCombined.isBold === run.isBold &&
+          prevCombined.isItalic === run.isItalic &&
+          prevCombined.isUnderline === run.isUnderline &&
+          prevCombined.fontCategory === run.fontCategory &&
+          Math.abs(prevCombined.fontSize - run.fontSize) < 0.5
+        ) {
+          prevCombined.text += runText;
+        } else {
+          combinedRuns.push({
+            ...run,
+            text: runText,
+          });
+        }
+      }
     }
 
-    const fullOriginalText = textPieces.join(p.isSingleLine ? " " : "\n");
-    const blockWidth = Math.max(maxX - minX, p.fontSize * 0.5 * fullOriginalText.length);
-    const blockHeight = Math.max(maxY - minY, p.fontSize * 1.25);
+    const fullOriginalText = combinedRuns.map((r) => r.text).join("");
+
+    // Union bounds in PDF coordinates
+    let minX = columnX;
+    let maxX = columnX + columnWidth;
+    if (firstLineIndent < 0) minX = Math.min(minX, columnX + firstLineIndent);
+    if (firstLineIndent > 0) maxX = Math.max(maxX, columnX + columnWidth);
+
+    const topBaseline = pLines[0].ty;
+    const bottomBaseline = pLines[pLines.length - 1].ty;
+    const totalHeight = topBaseline - bottomBaseline + pLines[pLines.length - 1].fontSize * 1.25;
+    const minY = bottomBaseline - pLines[pLines.length - 1].fontSize * 0.25;
 
     const pdfBounds = {
       x: minX,
       y: minY,
-      width: blockWidth,
-      height: blockHeight,
+      width: Math.max(30, maxX - minX),
+      height: Math.max(16, totalHeight),
     };
 
     // Calculate viewport CSS pixels using PDF.js viewport conversion
@@ -350,36 +502,55 @@ export async function extractPageText(
     const vWidth = Math.max(24, Math.round(Math.abs(right - left)));
     const vHeight = Math.max(14, Math.round(Math.abs(bottom - top)));
 
-    const fontInfo = resolveFontDisplayInfo(p.rawFontName, p.fontFamily, p.fontCategory);
+    const dominantRun = combinedRuns[0] || {
+      fontFamily: "Arial",
+      fontCategory: "sans-serif" as FontChoice,
+      fontSize: 12,
+      isBold: false,
+      isItalic: false,
+    };
+
+    const fontInfo = resolveFontDisplayInfo(dominantRun.fontFamily, dominantRun.fontFamily, dominantRun.fontCategory);
+
+    const layout: ParagraphLayout = {
+      columnX,
+      columnWidth,
+      firstLineIndent,
+      lineHeight: baselineLineHeight,
+      textAlign,
+      isLineMode: isSingleLine,
+    };
 
     return {
       id: `block_p${pageIndex}_${idx}_${Math.random().toString(36).slice(2, 7)}`,
       pageIndex,
       originalText: fullOriginalText,
       currentText: fullOriginalText,
-      x: p.lines[0].tx,
-      y: p.lines[0].ty,
+      x: columnX,
+      y: topBaseline,
       pdfBounds,
       originalLines,
+      runs: combinedRuns,
+      layout,
       viewportBounds: {
         left: vLeft,
         top: vTop,
         width: vWidth,
         height: vHeight,
       },
-      fontSize: p.fontSize,
-      fontFamily: p.fontFamily,
-      fontCategory: p.fontCategory,
-      fontName: p.rawFontName,
+      fontSize: dominantRun.fontSize,
+      fontFamily: dominantRun.fontFamily,
+      fontCategory: dominantRun.fontCategory,
+      fontName: dominantRun.fontFamily,
       isSubstitutedFont: fontInfo.isSubstitute,
       substitutedFontName: fontInfo.substitutedFontName,
-      isBold: p.isBold,
-      isItalic: p.isItalic,
+      isBold: dominantRun.isBold,
+      isItalic: dominantRun.isItalic,
       isUnderline: false,
-      textAlign: "left",
-      isSingleLine: p.isSingleLine,
-      lineHeight: 1.25,
-      color: { r: 0.1, g: 0.1, b: 0.1 }, // Refined by canvas sampling
+      textAlign,
+      isSingleLine,
+      lineHeight: Math.round((baselineLineHeight / dominantRun.fontSize) * 100) / 100,
+      color: { r: 0.1, g: 0.1, b: 0.1 },
       bgColor: { r: 1, g: 1, b: 1 },
     };
   });
@@ -492,10 +663,8 @@ export function sampleTextColor(
 
       if (a < 150) continue;
 
-      // Color distance from background
       const dist = Math.hypot(r - bgR255, g - bgG255, b - bgB255);
       if (dist > 40) {
-        // Pixel is glyph / foreground
         const lum = 0.299 * r + 0.587 * g + 0.114 * b;
         if (lum < darkestLuminance) {
           darkestLuminance = lum;
@@ -565,4 +734,5 @@ export function findNearestBlockStyle(
     color: { ...closestBlock.color },
   };
 }
+
 

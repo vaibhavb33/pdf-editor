@@ -119,6 +119,7 @@ export function EditToolbar({
         <div className="flex items-center rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-800/50">
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={onUndo}
             disabled={!canUndo}
             className="flex min-h-[34px] min-w-[34px] items-center justify-center rounded-l-lg text-zinc-600 hover:text-zinc-900 disabled:opacity-35 dark:text-zinc-400 dark:hover:text-white"
@@ -131,6 +132,7 @@ export function EditToolbar({
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={onRedo}
             disabled={!canRedo}
             className="flex min-h-[34px] min-w-[34px] items-center justify-center rounded-r-lg border-l border-zinc-200 text-zinc-600 hover:text-zinc-900 disabled:opacity-35 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-white"
@@ -201,6 +203,7 @@ export function EditToolbar({
             <button
               type="button"
               disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 if (!fmt) return;
                 onApplyFormatting({ fontSize: Math.max(6, Math.round(fmt.fontSize - 1)) });
@@ -226,6 +229,7 @@ export function EditToolbar({
             <button
               type="button"
               disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 if (!fmt) return;
                 onApplyFormatting({ fontSize: Math.min(96, Math.round(fmt.fontSize + 1)) });
@@ -243,6 +247,7 @@ export function EditToolbar({
             <button
               type="button"
               disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => onApplyFormatting({ isBold: !fmt?.isBold })}
               aria-pressed={fmt?.isBold}
               className={`flex h-8 w-8 items-center justify-center rounded-l-lg font-bold transition-colors ${
@@ -259,6 +264,7 @@ export function EditToolbar({
             <button
               type="button"
               disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => onApplyFormatting({ isItalic: !fmt?.isItalic })}
               aria-pressed={fmt?.isItalic}
               className={`flex h-8 w-8 items-center justify-center border-l border-zinc-200 font-serif italic transition-colors dark:border-zinc-700 ${
@@ -275,6 +281,7 @@ export function EditToolbar({
             <button
               type="button"
               disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => onApplyFormatting({ isUnderline: !fmt?.isUnderline })}
               aria-pressed={fmt?.isUnderline}
               className={`flex h-8 w-8 items-center justify-center border-l border-zinc-200 underline transition-colors dark:border-zinc-700 ${
@@ -293,6 +300,7 @@ export function EditToolbar({
             <button
               type="button"
               disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => onApplyFormatting({ textAlign: "left" })}
               className={`flex h-8 w-8 items-center justify-center rounded-l-lg ${
                 fmt?.textAlign === "left" || !fmt?.textAlign
@@ -308,6 +316,7 @@ export function EditToolbar({
             <button
               type="button"
               disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => onApplyFormatting({ textAlign: "center" })}
               className={`flex h-8 w-8 items-center justify-center border-l border-zinc-200 dark:border-zinc-700 ${
                 fmt?.textAlign === "center"
@@ -323,6 +332,7 @@ export function EditToolbar({
             <button
               type="button"
               disabled={!selectedBlock}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => onApplyFormatting({ textAlign: "right" })}
               className={`flex h-8 w-8 items-center justify-center border-l border-zinc-200 rounded-r-lg dark:border-zinc-700 ${
                 fmt?.textAlign === "right"
@@ -344,6 +354,7 @@ export function EditToolbar({
                 key={swatch.hex}
                 type="button"
                 disabled={!selectedBlock}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onApplyFormatting({ color: swatch.rgb })}
                 style={{ backgroundColor: swatch.hex }}
                 className="h-5 w-5 rounded-md border border-black/10 transition-transform hover:scale-110 disabled:opacity-40"
@@ -377,6 +388,7 @@ export function EditToolbar({
           <button
             type="button"
             disabled={!selectedBlock}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={onClearFormatting}
             className="flex min-h-[34px] items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
             title="Clear formatting (reset to default Arial 12pt)"
@@ -391,6 +403,7 @@ export function EditToolbar({
           {selectedBlock && (
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={onDeleteSelectedBlock}
               className="flex min-h-[34px] items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
               title="Delete text block (Delete key)"

@@ -8,7 +8,31 @@ export type FontChoice =
   | "devanagari"
   | "gujarati";
 
-export type TextAlign = "left" | "center" | "right";
+export type TextAlignment = "left" | "center" | "right" | "justify";
+export type TextAlign = TextAlignment;
+
+export interface TextRun {
+  id: string;
+  text: string;
+  fontFamily: string;
+  fontCategory: FontChoice;
+  fontSize: number; // in PDF points
+  isBold: boolean;
+  isItalic: boolean;
+  isUnderline?: boolean;
+  color: { r: number; g: number; b: number };
+}
+
+export interface ParagraphLayout {
+  columnX: number; // PDF points left edge
+  columnWidth: number; // PDF points width (median right edge minus column left edge)
+  firstLineIndent: number; // in pt (first line x - column left edge)
+  lineHeight: number; // in pt (median baseline-to-baseline distance)
+  textAlign: TextAlignment;
+  isLineMode: boolean; // if true, paragraph grouping confidence was low; each line is isolated
+  letterSpacing?: number;
+  wordSpacing?: number;
+}
 
 export interface OriginalLine {
   text: string;
@@ -16,6 +40,7 @@ export interface OriginalLine {
   y: number; // PDF points
   width: number;
   height: number;
+  runs?: TextRun[];
 }
 
 export interface TextBlock {
@@ -34,6 +59,8 @@ export interface TextBlock {
     height: number;
   };
   originalLines?: OriginalLine[];
+  runs?: TextRun[];
+  layout?: ParagraphLayout;
 
   // Viewport/Canvas pixel coordinates for DOM overlay
   viewportBounds: {
@@ -53,7 +80,7 @@ export interface TextBlock {
   isBold: boolean;
   isItalic: boolean;
   isUnderline?: boolean;
-  textAlign?: TextAlign;
+  textAlign: TextAlignment;
 
   color: { r: number; g: number; b: number }; // 0 to 1 scale
   bgColor?: { r: number; g: number; b: number }; // sampled background color (0 to 1)
@@ -90,6 +117,7 @@ export interface NewTextBoxParams {
   isBold: boolean;
   isItalic: boolean;
   isUnderline?: boolean;
-  textAlign?: TextAlign;
+  textAlign?: TextAlignment;
 }
+
 
